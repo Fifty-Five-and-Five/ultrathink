@@ -50,7 +50,7 @@ import shutil
 
 # Import save functions from host.py
 sys.path.insert(0, str(Path(__file__).parent))
-from host import append_to_kb
+from host import append_to_kb, update_last_entry
 
 # Config
 PROJECT_FOLDER = r'C:\Users\ChrisWright\OneDrive - Fifty Five and Five\dev\ultrathink'
@@ -273,6 +273,9 @@ class UltraThinkWidget(QWidget):
         # Auto-save timer for expanded mode (every 10s)
         self.autosave_timer = QTimer()
         self.autosave_timer.timeout.connect(self._autosave_expanded)
+
+        # Track current long note timestamp (for updating same entry)
+        self.current_note_timestamp = None
 
         self.init_ui()
 
@@ -1247,9 +1250,13 @@ class UltraThinkWidget(QWidget):
             self.expand_btn.setToolTip("Collapse notes")
             # Start auto-save timer (every 10 seconds)
             self.autosave_timer.start(10000)
+            # Reset note timestamp for fresh note
+            self.current_note_timestamp = None
         else:
             # Stop auto-save timer
             self.autosave_timer.stop()
+            # Clear note timestamp
+            self.current_note_timestamp = None
             # Collapse: hide toolbar, restore default size
             self.toolbar_widget.hide()
             self.resize(self.default_size[0], self.default_size[1])
@@ -1332,21 +1339,31 @@ class UltraThinkWidget(QWidget):
         QApplication.processEvents()
 
         try:
-            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            entry = {
-                'type': 'snippet',
-                'source': 'widget',
-                'captured': timestamp,
-                'title': 'Note',
-                'url': '',
-                'tabGroup': None,
-                'selectedText': text,
-                'notes': ''
-            }
+            if self.current_note_timestamp:
+                # Update existing entry
+                result = update_last_entry(PROJECT_FOLDER, self.current_note_timestamp, text)
+                if not result.get('success'):
+                    raise Exception(result.get('error', 'Unknown error'))
+            else:
+                # Create new entry (first save)
+                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                entry = {
+                    'type': 'long-note',
+                    'source': 'widget',
+                    'captured': timestamp,
+                    'title': 'Long Note',
+                    'url': '',
+                    'tabGroup': None,
+                    'selectedText': text,
+                    'notes': ''
+                }
 
-            result = append_to_kb(PROJECT_FOLDER, entry)
-            if not result.get('success'):
-                raise Exception(result.get('error', 'Unknown error'))
+                result = append_to_kb(PROJECT_FOLDER, entry)
+                if not result.get('success'):
+                    raise Exception(result.get('error', 'Unknown error'))
+
+                # Store timestamp for subsequent updates
+                self.current_note_timestamp = timestamp
 
             # Show spinner for 2 seconds then restore save icon
             QTimer.singleShot(2000, self._restore_save_button)
