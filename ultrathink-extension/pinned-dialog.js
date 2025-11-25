@@ -8,6 +8,24 @@
     return;
   }
 
+  // Detect type from filename (for dropped files)
+  function detectFileType(filename) {
+    if (!filename) return 'file';
+    const ext = filename.toLowerCase().split('.').pop();
+
+    if (ext === 'md') return 'markdown';
+    if (ext === 'pdf') return 'pdf';
+    if (['doc', 'docx', 'rtf'].includes(ext)) return 'ms-word';
+    if (['ppt', 'pptx'].includes(ext)) return 'ms-powerpoint';
+    if (['xls', 'xlsx', 'csv'].includes(ext)) return 'ms-excel';
+    if (['one', 'onetoc2'].includes(ext)) return 'ms-onenote';
+    if (['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a', 'wma', 'aiff'].includes(ext)) return 'audio';
+    if (['mp4', 'mkv', 'avi', 'mov', 'wmv', 'flv', 'webm'].includes(ext)) return 'video';
+    if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp'].includes(ext)) return 'image';
+
+    return 'file';
+  }
+
   let countdown = 3;
   let timerInterval = null;
   let autoSaveTriggered = false;
@@ -355,8 +373,9 @@
             throw new Error(response?.error || 'Failed to save text');
           }
         } else {
-          // Read file and send to background
+          // Read file and send to background with detected type
           const fileData = await readFileAsDataURL(item.file);
+          const detectedType = detectFileType(item.name);
 
           const response = await chrome.runtime.sendMessage({
             action: 'saveFile',
@@ -364,6 +383,7 @@
             fileName: item.name,
             fileData: fileData,
             mimeType: item.file.type,
+            detectedType: detectedType,  // Pass detected type to background
             notes: notes
           });
 

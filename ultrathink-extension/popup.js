@@ -109,7 +109,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (selectedText) {
           // If text is selected, use snippet type
           document.getElementById('type').value = 'snippet';
-          document.getElementById('notes').value = selectedText;
+          // Show selected text as preview, but keep notes empty for user commentary
+          document.getElementById('notes').placeholder = 'Add notes about this selection...';
         } else {
           // Otherwise, auto-detect type from URL
           const detectedType = detectUrlType(tab.url);
@@ -252,14 +253,15 @@ async function saveEntry() {
 
   // Gather common data
   const type = document.getElementById('type').value;
-  const notes = document.getElementById('notes').value;
+  const userNotes = document.getElementById('notes').value;
 
   // Send to background script to handle saving (with or without bulk)
   try {
     const saveRequest = {
       action: checkbox.checked ? 'saveAllTabs' : 'save',
       type: type,
-      notes: notes || selectedText || '',
+      selectedText: selectedText || '',  // Separate: text selected from page
+      notes: userNotes || '',            // Separate: user-added commentary
       screenshotData: screenshotData
     };
 

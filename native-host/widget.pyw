@@ -572,38 +572,47 @@ class UltraThinkWidget(QWidget):
             self.timer_label.show()
             QApplication.processEvents()
 
-            notes = self.notes.toPlainText()
+            user_notes = self.notes.toPlainText()
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
             for item in self.pending_files:
                 if item['type'] == 'text':
-                    # Use current notes content (user may have edited)
+                    # Text note - use consistent format
                     entry = {
                         'type': 'snippet',
+                        'source': 'widget',              # New: 'browser' or 'widget'
                         'captured': timestamp,
-                        'source': 'Desktop Widget',
                         'title': 'Note',
-                        'content': notes
+                        'url': '',                       # No URL for widget
+                        'tabGroup': None,
+                        'selectedText': user_notes,      # Text content goes to selectedText
+                        'notes': ''                      # No separate notes for pure text
                     }
                 elif item['type'] == 'screenshot':
-                    # Clipboard paste - keep as screenshot
+                    # Clipboard paste - keep as image type
                     entry = {
-                        'type': 'screenshot',
+                        'type': 'image',
+                        'source': 'widget',
                         'captured': timestamp,
-                        'source': item['name'],
-                        'title': item['name'],
-                        'content': notes,
-                        'fileData': f"data:application/octet-stream;base64,{item['data']}"
+                        'title': f"clipboard-image_{timestamp.replace(' ', '_').replace(':', '-')}.png",
+                        'url': '',
+                        'tabGroup': None,
+                        'selectedText': '',
+                        'notes': user_notes,
+                        'fileData': f"data:image/png;base64,{item['data']}"
                     }
                 else:
                     # Dragged file - detect type from extension
                     file_type = detect_file_type(item['name'])
                     entry = {
                         'type': file_type,
+                        'source': 'widget',
                         'captured': timestamp,
-                        'source': item['name'],
                         'title': item['name'],
-                        'content': notes,
+                        'url': '',
+                        'tabGroup': None,
+                        'selectedText': '',
+                        'notes': user_notes,
                         'fileData': f"data:application/octet-stream;base64,{item['data']}"
                     }
 
@@ -826,16 +835,19 @@ class UltraThinkWidget(QWidget):
                 # Save WAV file (audio is already int16)
                 write_wav(str(filepath), samplerate, audio)
 
-                # Add to kb.md
+                # Add to kb.md with consistent format
                 with open(filepath, 'rb') as f:
                     data = base64.b64encode(f.read()).decode()
 
                 entry = {
                     'type': 'audio',
+                    'source': 'widget',
                     'captured': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                    'source': filename,
                     'title': filename,
-                    'content': self.notes.toPlainText(),
+                    'url': '',
+                    'tabGroup': None,
+                    'selectedText': '',
+                    'notes': self.notes.toPlainText(),
                     'fileData': f"data:audio/wav;base64,{data}"
                 }
 

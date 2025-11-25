@@ -173,15 +173,17 @@ async function handleSaveSingle(request) {
     const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
     const tab = request.tab;
     const tabGroup = await getTabGroupInfo(tab);
-    const originalNotes = request.notes || '';
 
+    // Build entry with new consistent format
     const data = {
       type: request.type,
+      source: 'browser',           // New: 'browser' or 'widget'
       captured: timestamp,
-      source: tab.url,
       title: tab.title,
-      content: originalNotes,
-      tabGroup: tabGroup
+      url: tab.url,                // New: URL is now separate field
+      tabGroup: tabGroup,
+      selectedText: request.selectedText || '',  // New: separate from notes
+      notes: request.notes || ''                 // New: user commentary
     };
 
     // Add screenshot data if present
@@ -200,6 +202,7 @@ async function handleSaveSingle(request) {
 
     if (response && response.success) {
       // Fix grammar in background (don't await - let it happen async)
+      const originalNotes = request.notes || '';
       if (originalNotes && originalNotes.trim().length > 0) {
         fixGrammarAndUpdate(projectFolder, timestamp, originalNotes, {
           url: tab.url,
@@ -268,13 +271,16 @@ async function handleSaveAllTabs(request) {
     for (const tab of request.tabs) {
       const tabGroup = await getTabGroupInfo(tab);
 
+      // Build entry with new consistent format
       const data = {
         type: request.type,
+        source: 'browser',           // New: 'browser' or 'widget'
         captured: timestamp,
-        source: tab.url,
         title: tab.title,
-        content: request.notes || '',
-        tabGroup: tabGroup
+        url: tab.url,                // New: URL is now separate field
+        tabGroup: tabGroup,
+        selectedText: '',            // Bulk save doesn't capture selected text
+        notes: request.notes || ''   // New: user commentary
       };
 
       // Send to native host
@@ -309,13 +315,16 @@ async function handleFileSave(request, tab) {
     const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
     const originalNotes = request.notes || '';
 
-    const data = {
-      type: 'file',
+    // Build entry with new consistent format
+    let data = {
+      type: request.detectedType || 'file',  // Use detected type (pdf, image, audio, etc.)
+      source: 'browser',                      // Pinned dialog is in browser context
       captured: timestamp,
-      source: request.fileName,  // Use filename as source
       title: request.fileName,
-      content: originalNotes,
-      tabGroup: null  // No tab group for dropped files
+      url: '',                                // No URL for dropped files
+      tabGroup: null,                         // No tab group for dropped files
+      selectedText: '',
+      notes: originalNotes
     };
 
     // Add file data if it's a file (not text)
@@ -323,11 +332,11 @@ async function handleFileSave(request, tab) {
       data.fileData = request.fileData;
       data.mimeType = request.mimeType;
     } else if (request.fileType === 'text') {
-      // For pasted text, save as snippet
+      // For pasted text, save as snippet with page context
       data.type = 'snippet';
-      data.content = request.content;
-      data.source = tab.url;  // Use current page URL for text
+      data.url = tab.url;              // Use current page URL for text
       data.title = tab.title;
+      data.selectedText = request.content;  // Pasted text goes to selectedText
     }
 
     // Send to native host

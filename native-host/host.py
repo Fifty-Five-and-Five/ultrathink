@@ -40,20 +40,27 @@ def send_message(message):
 
 
 def format_markdown_entry(entry, screenshot_path=None, file_path=None):
-    """Format entry data as markdown bullet list with metadata."""
+    """Format entry data as markdown with consistent structure.
+
+    Format: - `type` | `source` | `timestamp` | [Title](URL) | `group: Name (color)`
+    """
     lines = []
 
-    # Main bullet with title, type, and timestamp
+    # Extract fields
     title = entry.get('title', 'Untitled')
-    url = entry['source']
+    url = entry.get('url', '')  # URL is now separate from source
     entry_type = entry['type']
     timestamp = entry['captured']
+    source = entry.get('source', 'browser')  # 'browser' or 'widget'
 
-    # Build main line - for files, don't create a link if source is just filename
-    if entry_type == 'file':
-        main_line = f"- **{title}** - `{entry_type}` - `{timestamp}`"
+    # Build main line: type | source | timestamp | title (with optional URL) | optional group
+    main_line = f"- `{entry_type}` | `{source}` | `{timestamp}` | "
+
+    # Add title with URL only if URL exists and is a valid URL (not a filename)
+    if url and url.startswith(('http://', 'https://', 'file://', 'chrome-extension://')):
+        main_line += f"[{title}]({url})"
     else:
-        main_line = f"- **[{title}]({url})** - `{entry_type}` - `{timestamp}`"
+        main_line += title
 
     # Add tab group if present
     tab_group = entry.get('tabGroup')
@@ -62,36 +69,46 @@ def format_markdown_entry(entry, screenshot_path=None, file_path=None):
         group_color = tab_group.get('groupColor', '')
 
         if group_name:
-            main_line += f" - `group: {group_name} ({group_color})`"
-        else:
-            main_line += f" - `group: ({group_color})`"
+            main_line += f" | `group: {group_name} ({group_color})`"
+        elif group_color:
+            main_line += f" | `group: ({group_color})`"
 
     lines.append(main_line)
 
-    # For screenshots, add image reference
-    if entry_type == 'screenshot' and screenshot_path:
+    # Add selected text as blockquote (if present)
+    selected_text = entry.get('selectedText', '').strip()
+    if selected_text:
+        # Clean up and format as blockquote
+        text_lines = [line.strip() for line in selected_text.split('\n') if line.strip()]
+        if len(text_lines) <= 5:
+            for line in text_lines:
+                lines.append(f"  - > {line}")
+        else:
+            for line in text_lines[:5]:
+                lines.append(f"  - > {line}")
+            lines.append(f"  - > _(... {len(text_lines) - 5} more lines)_")
+
+    # Add screenshot image reference
+    if screenshot_path:
         lines.append(f"  - ![Screenshot]({screenshot_path})")
 
-    # For files, add file link
-    if entry_type == 'file' and file_path:
-        lines.append(f"  - [📎 {title}]({file_path})")
+    # Add file attachment link
+    if file_path:
+        lines.append(f"  - [Attachment]({file_path})")
 
-    # Content/notes as indented text if present
-    content = entry.get('content', '').strip()
-    if content:
-        # Clean up excessive whitespace and empty lines
-        content_lines = [line.strip() for line in content.split('\n') if line.strip()]
-
-        # Indent content under the main bullet
-        if len(content_lines) <= 3:
-            # For short content, put on one line
-            lines.append(f"  - {' '.join(content_lines)}")
+    # Add notes (user commentary) if present
+    notes = entry.get('notes', '').strip()
+    if notes:
+        # Clean up and prefix with "Notes:"
+        note_lines = [line.strip() for line in notes.split('\n') if line.strip()]
+        if len(note_lines) == 1:
+            lines.append(f"  - Notes: {note_lines[0]}")
         else:
-            # For longer content, use multiple indented lines
-            for line in content_lines[:5]:  # Limit to first 5 lines
-                lines.append(f"  - {line}")
-            if len(content_lines) > 5:
-                lines.append(f"  - _(... {len(content_lines) - 5} more lines)_")
+            lines.append(f"  - Notes: {note_lines[0]}")
+            for line in note_lines[1:5]:
+                lines.append(f"    {line}")
+            if len(note_lines) > 5:
+                lines.append(f"    _(... {len(note_lines) - 5} more lines)_")
 
     lines.append('')  # Single blank line between entries
 
@@ -190,7 +207,7 @@ def append_to_kb(project_folder, entry):
 
         kb_file = folder_path / 'kb.md'
 
-        # Handle screenshot if present
+        # Handle screenshot if present (browser screenshot capture)
         screenshot_path = None
         if entry.get('type') == 'screenshot' and 'screenshot' in entry:
             screenshot_path = save_screenshot(
@@ -201,9 +218,9 @@ def append_to_kb(project_folder, entry):
             if not screenshot_path:
                 return {'success': False, 'error': 'Failed to save screenshot'}
 
-        # Handle file if present
+        # Handle file data if present (files, audio, images, etc.)
         file_path = None
-        if entry.get('type') == 'file' and 'fileData' in entry:
+        if 'fileData' in entry:
             file_path = save_file(
                 project_folder,
                 entry['fileData'],
