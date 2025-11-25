@@ -1,0 +1,9 @@
+{
+  "name": "com.ultrathink.kbsaver",
+  "description": "UltraThink Knowledge Base Saver",
+  "path": "C:\\Users\\ChrisWright\\OneDrive - Fifty Five and Five\\dev\\ultrathink\\native-host\\host.bat",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://nnkkelcnmgdajljbpnciamcljdbcjdfi/"
+  ]
+}

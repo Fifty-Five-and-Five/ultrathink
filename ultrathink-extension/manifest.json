@@ -1,0 +1,50 @@
+{
+  "manifest_version": 3,
+  "name": "UltraThink URL Saver",
+  "version": "1.2.5",
+  "description": "Save URLs, snippets, and ideas to your knowledge base markdown file",
+  "permissions": [
+    "activeTab",
+    "tabs",
+    "tabGroups",
+    "scripting",
+    "nativeMessaging",
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "options_page": "options.html",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+4",
+        "mac": "Command+Shift+4"
+      },
+      "description": "Open UltraThink save popup"
+    },
+    "capture-screenshot": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+5",
+        "mac": "Command+Shift+5"
+      },
+      "description": "Capture screenshot and save to KB"
+    }
+  }
+}

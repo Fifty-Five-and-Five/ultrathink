@@ -1,0 +1,38 @@
+# Logs
+native-host/host.log
+*.log
+
+# Screenshots folder (can contain many large files)
+screenshots/
+
+# Local kb.md file (user's personal knowledge base)
+kb.md
+
+# Brainstorm files (working notes, not production code)
+brainstorm.md
+brainstormv2.md
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Claude Code
+.claude/
+
+# Extension development files
+*.crx
+*.pem

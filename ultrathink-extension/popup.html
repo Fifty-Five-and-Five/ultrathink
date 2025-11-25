@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Save to UltraThink</title>
+  <style>
+    body {
+      width: 400px;
+      padding: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      margin: 0;
+    }
+
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    h3 {
+      margin: 0;
+      font-size: 16px;
+      color: #333;
+    }
+
+    .version {
+      font-size: 10px;
+      color: #999;
+    }
+
+    .pin-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 6px;
+      color: #666;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 4px;
+    }
+
+    .pin-btn:hover {
+      color: #0066cc;
+      background: #f0f7ff;
+    }
+
+    .pin-btn:active svg {
+      fill: #ff5200;
+      stroke: #ff5200;
+    }
+
+    .pin-btn.pinned svg {
+      fill: #ff5200;
+      stroke: #ff5200;
+    }
+
+    .pin-btn svg {
+      display: block;
+    }
+
+    .field {
+      margin-bottom: 12px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 13px;
+      font-weight: 500;
+      color: #555;
+    }
+
+    select, textarea, input {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 13px;
+      box-sizing: border-box;
+      font-family: inherit;
+    }
+
+    textarea {
+      resize: vertical;
+      min-height: 60px;
+      outline-color: #999;
+    }
+
+    .url-preview {
+      font-size: 12px;
+      color: #666;
+      margin-bottom: 8px;
+      padding: 8px;
+      background: #f5f5f5;
+      border-radius: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .timer-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: #666;
+      margin-bottom: 12px;
+    }
+
+    .timer {
+      flex: 0 0 auto;
+    }
+
+    .separator {
+      color: #999;
+    }
+
+    .all-tabs-option {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .all-tabs-option input[type="checkbox"] {
+      width: auto;
+      margin: 0;
+      cursor: pointer;
+    }
+
+    .all-tabs-option label {
+      margin: 0;
+      font-size: 12px;
+      font-weight: normal;
+      color: #666;
+      cursor: pointer;
+    }
+
+    .buttons {
+      margin-top: 16px;
+    }
+
+    button {
+      width: 50%;
+      padding: 10px;
+      border: none;
+      border-radius: 4px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    #saveBtn {
+      background: #0066cc;
+      color: white;
+    }
+
+    #saveBtn:hover {
+      background: #0052a3;
+    }
+
+    #saveBtn:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+
+    .status {
+      text-align: center;
+      padding: 8px;
+      border-radius: 4px;
+      font-size: 13px;
+      margin-top: 12px;
+      display: none;
+    }
+
+    .status.success {
+      background: #d4edda;
+      color: #155724;
+      display: block;
+    }
+
+    .status.error {
+      background: #f8d7da;
+      color: #721c24;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h3>Ultrathink</h3>
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <button id="pinBtn" class="pin-btn" title="Pin as drop target">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/>
+        </svg>
+      </button>
+      <span class="version">v1.2.5</span>
+    </div>
+  </div>
+
+  <div class="timer-row">
+    <div class="timer" id="timer">Auto-saving in 3 seconds...</div>
+    <span class="separator">|</span>
+    <div class="all-tabs-option">
+      <input type="checkbox" id="allTabsCheckbox">
+      <label for="allTabsCheckbox" id="allTabsLabel">All tabs (0)</label>
+    </div>
+  </div>
+
+  <div class="url-preview" id="urlPreview">Loading...</div>
+
+  <div class="field">
+    <select id="type">
+      <option value="audio">Audio</option>
+      <option value="chatgpt">ChatGPT</option>
+      <option value="claude">Claude</option>
+      <option value="file">File</option>
+      <option value="idea">Idea</option>
+      <option value="image">Image</option>
+      <option value="link">Link</option>
+      <option value="markdown">Markdown</option>
+      <option value="ms-excel">MS Excel</option>
+      <option value="ms-onenote">MS OneNote</option>
+      <option value="ms-powerpoint">MS PowerPoint</option>
+      <option value="ms-word">MS Word</option>
+      <option value="notion">Notion</option>
+      <option value="para">Paragraph</option>
+      <option value="pdf">PDF</option>
+      <option value="perplexity">Perplexity</option>
+      <option value="screenshot">Screenshot</option>
+      <option value="snippet">Snippet</option>
+      <option value="video">Video</option>
+    </select>
+  </div>
+
+  <div class="field">
+    <textarea id="notes" placeholder="Add notes or edit the captured text..."></textarea>
+  </div>
+
+  <div class="status" id="status"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
