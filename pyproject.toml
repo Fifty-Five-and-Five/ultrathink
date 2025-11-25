@@ -1,0 +1,47 @@
+[project]
+name = "ultrathink"
+version = "1.5.1"
+description = "UltraThink - Knowledge capture desktop widget and native host"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "UltraThink Team"}
+]
+keywords = ["knowledge-base", "note-taking", "browser-extension", "desktop-widget"]
+
+# Core dependencies (required for native host)
+dependencies = [
+    "PyQt6>=6.4.0",
+]
+
+[project.optional-dependencies]
+# Full desktop widget with all features
+full = [
+    "PyQt6>=6.4.0",
+    "sounddevice>=0.4.6",
+    "scipy>=1.10.0",
+    "numpy>=1.24.0",
+    "mss>=9.0.0",
+]
+# Windows-specific for system audio capture
+windows = [
+    "pyaudiowpatch>=0.2.12; sys_platform == 'win32'",
+]
+# Development and build tools
+dev = [
+    "pyinstaller>=6.0.0",
+    "pytest>=7.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["native-host"]
+
+[tool.pyinstaller]
+# Common PyInstaller settings
+console = false
+onefile = true

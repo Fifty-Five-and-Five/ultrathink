@@ -18,17 +18,23 @@ from datetime import datetime
 # SECURITY: Path and Input Validation
 # =============================================================================
 
-# Blocked system directories (case-insensitive)
-BLOCKED_PATHS = [
+# Blocked system directories (case-insensitive on Windows)
+BLOCKED_PATHS_WINDOWS = [
     'c:\\windows',
     'c:\\program files',
     'c:\\program files (x86)',
     'c:\\programdata',
+]
+
+BLOCKED_PATHS_UNIX = [
     '/etc',
     '/usr',
     '/bin',
     '/sbin',
     '/var',
+    '/System',
+    '/Library',
+    '/Applications',
 ]
 
 
@@ -37,6 +43,8 @@ def validate_project_folder(project_folder):
     Validate project folder is a safe, absolute path.
     Returns (is_valid, normalized_path_or_error).
     """
+    import platform
+
     if not project_folder:
         return False, "Project folder cannot be empty"
 
@@ -54,11 +62,17 @@ def validate_project_folder(project_folder):
         if not folder_path.is_dir():
             return False, f"Project folder is not a directory: {project_folder}"
 
-        # Block system directories
-        folder_str = str(folder_path).lower()
-        for blocked in BLOCKED_PATHS:
-            if folder_str.startswith(blocked):
-                return False, f"Cannot use system directory: {folder_path}"
+        # Block system directories based on platform
+        folder_str = str(folder_path)
+        if platform.system() == 'Windows':
+            folder_str_lower = folder_str.lower()
+            for blocked in BLOCKED_PATHS_WINDOWS:
+                if folder_str_lower.startswith(blocked):
+                    return False, f"Cannot use system directory: {folder_path}"
+        else:
+            for blocked in BLOCKED_PATHS_UNIX:
+                if folder_str.startswith(blocked):
+                    return False, f"Cannot use system directory: {folder_path}"
 
         # Block path traversal attempts
         if '..' in project_folder:
@@ -463,50 +477,68 @@ def update_last_entry(project_folder, timestamp, new_content):
 def launch_widget():
     """Launch the desktop widget in a separate process."""
     import subprocess
+    import platform
+
     widget_path = Path(__file__).parent / 'widget.pyw'
 
     if not widget_path.exists():
         return {'success': False, 'error': 'Widget not found'}
 
     try:
-        # Launch with pythonw (no console window)
-        subprocess.Popen(
-            ['pythonw', str(widget_path)],
-            creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
-            close_fds=True
-        )
-        return {'success': True}
-    except FileNotFoundError:
-        # Try with python if pythonw not found
-        try:
+        if platform.system() == 'Windows':
+            # Windows: Launch with pythonw (no console window)
+            try:
+                subprocess.Popen(
+                    ['pythonw', str(widget_path)],
+                    creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+                    close_fds=True
+                )
+            except FileNotFoundError:
+                # Try with python if pythonw not found
+                subprocess.Popen(
+                    ['python', str(widget_path)],
+                    creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+                    close_fds=True
+                )
+        else:
+            # macOS/Linux: Use python3 with nohup-style detachment
             subprocess.Popen(
-                ['python', str(widget_path)],
-                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
-                close_fds=True
+                ['python3', str(widget_path)],
+                start_new_session=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL
             )
-            return {'success': True}
-        except Exception as e:
-            return {'success': False, 'error': f'Failed to launch: {str(e)}'}
+        return {'success': True}
     except Exception as e:
-        return {'success': False, 'error': str(e)}
+        return {'success': False, 'error': f'Failed to launch: {str(e)}'}
 
 
 def close_widget():
     """Close the desktop widget by finding and terminating the process."""
     import subprocess
+    import platform
+
     try:
-        # Find and kill pythonw processes running widget.pyw
-        result = subprocess.run(
-            ['taskkill', '/F', '/IM', 'pythonw.exe', '/FI', 'WINDOWTITLE eq UltraThink*'],
-            capture_output=True,
-            text=True
-        )
-        # Also try killing by window title using powershell
-        subprocess.run(
-            ['powershell', '-Command',
-             "Get-Process | Where-Object {$_.MainWindowTitle -like '*UltraThink*'} | Stop-Process -Force"],
-            capture_output=True
-        )
+        if platform.system() == 'Windows':
+            # Windows: Find and kill pythonw processes running widget.pyw
+            subprocess.run(
+                ['taskkill', '/F', '/IM', 'pythonw.exe', '/FI', 'WINDOWTITLE eq UltraThink*'],
+                capture_output=True,
+                text=True
+            )
+            # Also try killing by window title using powershell
+            subprocess.run(
+                ['powershell', '-Command',
+                 "Get-Process | Where-Object {$_.MainWindowTitle -like '*UltraThink*'} | Stop-Process -Force"],
+                capture_output=True
+            )
+        else:
+            # macOS/Linux: Use pkill to find and terminate widget process
+            subprocess.run(
+                ['pkill', '-f', 'widget.pyw'],
+                capture_output=True
+            )
         return {'success': True}
     except Exception as e:
         return {'success': False, 'error': str(e)}
@@ -514,6 +546,8 @@ def close_widget():
 
 def browse_folder():
     """Open folder picker dialog and return selected path."""
+    import platform
+
     try:
         import tkinter as tk
         from tkinter import filedialog
@@ -526,10 +560,15 @@ def browse_folder():
         root.destroy()
 
         if folder:
-            # Normalize to Windows path with trailing backslash
-            folder = folder.replace('/', '\\')
-            if not folder.endswith('\\'):
-                folder += '\\'
+            if platform.system() == 'Windows':
+                # Normalize to Windows path with trailing backslash
+                folder = folder.replace('/', '\\')
+                if not folder.endswith('\\'):
+                    folder += '\\'
+            else:
+                # macOS/Linux: Use forward slashes with trailing slash
+                if not folder.endswith('/'):
+                    folder += '/'
             return {'success': True, 'path': folder}
         return {'success': False, 'error': 'No folder selected'}
     except Exception as e:

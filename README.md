@@ -84,10 +84,19 @@ ultrathink/
 
 ## Prerequisites
 
+### Windows
 - Windows 10/11
-- Microsoft Edge (Chromium-based)
-- Python 3.x installed and in PATH
+- Microsoft Edge or Google Chrome (Chromium-based)
+- Python 3.9+ installed and in PATH (for source install) OR use bundled executables
 - OpenAI API key (optional, for grammar correction feature)
+
+### macOS
+- macOS 10.15 (Catalina) or later
+- Google Chrome, Microsoft Edge, or Chromium
+- Python 3.9+ (via Homebrew: `brew install python`) OR use bundled executables
+- OpenAI API key (optional, for grammar correction feature)
+
+> **Note:** For easy installation without Python, see the [Cross-Platform Packaging](#cross-platform-packaging) section for standalone executables.
 
 ## Installation
 
@@ -273,6 +282,57 @@ The extension automatically detects content type from URLs:
 | Default | link |
 
 Override by manually selecting type in dropdown.
+
+## Cross-Platform Packaging
+
+UltraThink can be packaged as standalone executables that don't require Python to be installed.
+
+### Quick Install (Pre-built Releases)
+
+Download the latest release for your platform:
+
+#### Windows
+1. Extract the zip file
+2. Load the `extension/` folder in Edge/Chrome (developer mode)
+3. Run `install-bundled.bat` and enter your extension ID
+4. Double-click `UltraThink Widget.exe` to start the widget
+
+#### macOS
+1. Open the DMG and drag UltraThink Widget to Applications
+2. Load the `extension/` folder in Chrome/Edge (developer mode)
+3. Run `./install-bundled.sh` and enter your extension ID
+4. Open UltraThink Widget from Applications
+
+### Building from Source
+
+See `packaging/README.md` for detailed build instructions.
+
+#### Windows
+```batch
+cd packaging
+build-windows.bat
+```
+
+#### macOS
+```bash
+cd packaging
+chmod +x build-macos.sh
+./build-macos.sh
+```
+
+### macOS Manual Install (Python Required)
+
+```bash
+# Install dependencies
+pip3 install PyQt6 sounddevice scipy numpy mss
+
+# Install native host (run from project root)
+chmod +x native-host/install.sh
+./native-host/install.sh
+
+# Run widget
+python3 native-host/widget.pyw
+```
 
 ## Troubleshooting
 
