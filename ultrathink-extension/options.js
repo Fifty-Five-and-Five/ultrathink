@@ -1,12 +1,14 @@
 // Default settings
 const DEFAULT_SETTINGS = {
-  projectFolder: 'C:\\Users\\ChrisWright\\OneDrive - Fifty Five and Five\\dev\\ultrathink\\'
+  projectFolder: 'C:\\Users\\ChrisWright\\OneDrive - Fifty Five and Five\\dev\\ultrathink\\',
+  openaiKey: ''
 };
 
 // Load saved settings
 document.addEventListener('DOMContentLoaded', async () => {
   const settings = await chrome.storage.sync.get(DEFAULT_SETTINGS);
   document.getElementById('projectFolder').value = settings.projectFolder;
+  document.getElementById('openaiKey').value = settings.openaiKey || '';
 
   // Setup save button
   document.getElementById('saveBtn').addEventListener('click', saveSettings);
@@ -14,6 +16,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 async function saveSettings() {
   const projectFolder = document.getElementById('projectFolder').value.trim();
+  const openaiKey = document.getElementById('openaiKey').value.trim();
   const statusEl = document.getElementById('status');
 
   // Validate
@@ -31,7 +34,10 @@ async function saveSettings() {
   }
 
   // Save to storage
-  await chrome.storage.sync.set({ projectFolder: normalizedPath });
+  await chrome.storage.sync.set({
+    projectFolder: normalizedPath,
+    openaiKey: openaiKey
+  });
 
   // Show success message
   statusEl.textContent = 'Settings saved successfully!';

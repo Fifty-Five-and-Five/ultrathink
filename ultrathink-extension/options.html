@@ -28,7 +28,8 @@
       color: #555;
     }
 
-    input[type="text"] {
+    input[type="text"],
+    input[type="password"] {
       width: 100%;
       padding: 10px;
       border: 1px solid #ddd;
@@ -96,6 +97,14 @@
     </div>
     <div class="example">
       Example: C:\Users\ChrisWright\OneDrive - Fifty Five and Five\dev\ultrathink\
+    </div>
+  </div>
+
+  <div class="field">
+    <label for="openaiKey">OpenAI API Key:</label>
+    <input type="password" id="openaiKey" placeholder="sk-proj-...">
+    <div class="help-text">
+      Optional. Used for grammar fixing on saved notes. Get your key from <a href="https://platform.openai.com/api-keys" target="_blank">OpenAI</a>.
     </div>
   </div>
 

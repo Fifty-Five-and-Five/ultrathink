@@ -3,19 +3,26 @@ const HOST_NAME = 'com.ultrathink.kbsaver';
 
 // Default settings
 const DEFAULT_SETTINGS = {
-  projectFolder: 'C:\\Users\\ChrisWright\\OneDrive - Fifty Five and Five\\dev\\ultrathink\\'
+  projectFolder: 'C:\\Users\\ChrisWright\\OneDrive - Fifty Five and Five\\dev\\ultrathink\\',
+  openaiKey: ''
 };
 
 // Store screenshot temporarily
 let pendingScreenshot = null;
 
-// OpenAI API Key for grammar fixing - set your own key here
-const OPENAI_API_KEY = '';
-
 // Fix grammar using OpenAI Responses API
 async function fixGrammar(text, context = {}) {
   if (!text || text.trim().length === 0) {
     console.log('[Grammar] Skipping empty text');
+    return text;
+  }
+
+  // Get API key from storage
+  const settings = await chrome.storage.sync.get(DEFAULT_SETTINGS);
+  const apiKey = settings.openaiKey;
+
+  if (!apiKey) {
+    console.log('[Grammar] No API key configured, skipping');
     return text;
   }
 
@@ -51,7 +58,7 @@ async function fixGrammar(text, context = {}) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${OPENAI_API_KEY}`
+        'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
         model: 'gpt-5-nano',
