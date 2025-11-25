@@ -59,21 +59,23 @@ A powerful Microsoft Edge extension that captures URLs, text snippets, screensho
 ```
 ultrathink/
 ├── ultrathink-extension/     # Browser extension
-│   ├── manifest.json          # Extension configuration (v1.2.5)
+│   ├── manifest.json          # Extension configuration (v1.3.1)
 │   ├── popup.html             # Main popup interface
 │   ├── popup.js               # Popup logic and pin toggle
 │   ├── background.js          # Service worker, native messaging, AI grammar
 │   ├── pinned-dialog.js       # Floating drop target content script
 │   ├── selection-overlay.js   # Screenshot area selection
 │   ├── options.html           # Settings page
-│   ├── options.js             # Settings logic
+│   ├── options.js             # Settings logic with validation
+│   ├── logger.js              # Centralized logging utility
+│   ├── shared-constants.js    # Shared constants and utilities
 │   └── icons/                 # Extension icons
 │       ├── icon16.png
 │       ├── icon48.png
 │       ├── icon128.png
 │       └── generate_icons.py
 └── native-host/               # Native messaging host
-    ├── host.py                # Python script for file I/O
+    ├── host.py                # Python script for file I/O (with path validation)
     ├── host.bat               # Windows launcher
     ├── com.ultrathink.kbsaver.json  # Native host manifest
     ├── install.bat            # Installation script
@@ -544,7 +546,73 @@ echo {"action":"append","projectFolder":"C:\\test\\","entry":{"type":"link","cap
 
 ### Version History
 
-- **v1.2.5** (Current)
+- **v1.5.1** (Current)
+  - Manual save in expanded mode (auto-save disabled when expanded)
+  - Save button with floppy disk icon on toolbar + Ctrl+S shortcut
+
+- **v1.5.0**
+  - Markdown formatting toolbar in expanded notes view
+  - 7 formatting buttons: Bold, Italic, Code, Link, Header, Quote, Bullet
+  - Keyboard shortcuts: Ctrl+B, Ctrl+I, Ctrl+`, Ctrl+K, Ctrl+H, Ctrl+Q, Ctrl+L
+  - Toolbar appears only when notes are expanded (notepad icon)
+
+- **v1.4.0**
+  - Expand notes button - hides drop zone, doubles widget size for more writing space
+  - Fixed screenshot area selection on high-DPI displays (DPR scaling)
+  - Widget pin state now properly tracked in browser extension
+
+- **v1.3.9**
+  - Removed video recording (too complex) - paste videos from external tools instead
+  - Videos now auto-save to /videos/ folder with 3s timer for notes
+  - Phosphor icons for buttons (microphone, speaker, image)
+  - Simplified to 3 capture buttons: mic, system audio, screenshot
+
+- **v1.3.8**
+  - Fixed screenshot area selection offset (widget-local to screen coordinate conversion)
+
+- **v1.3.7**
+  - Fixed screenshot area selection (now uses mss for reliable region capture)
+  - Fixed video stop UI freeze (file encoding now happens in background thread)
+  - Always record system audio with video (removed checkbox)
+  - Organized files: videos → /videos/, screenshots → /screenshots/
+  - Flat button icons: ● ◉ ◻ ▶ (mic, system, screenshot, video)
+  - Fixed SelectionOverlay DPR scaling
+
+- **v1.3.6**
+  - Orange circle now launches desktop widget (with mic/system/screenshot/video buttons)
+  - Removed lightweight in-page dialog in favor of full-featured desktop widget
+
+- **v1.3.5**
+  - Added screenshot capture to desktop widget (click for full screen, drag to select area)
+  - Added video recording to desktop widget with optional system audio
+  - Uses FFmpeg for video encoding (H.264/MP4)
+  - Selection overlay matches extension UI style
+
+- **v1.3.4**
+  - Audio recordings (mic/system) now show 3s timer for adding notes before save
+
+- **v1.3.3**
+  - Fixed pin button to properly toggle in-page dialog (was calling native widget)
+  - Pin state now correctly persists when reopening popup
+
+- **v1.3.2**
+  - Added selected text preview in popup (read-only, matches URL preview style)
+  - Subtle save feedback - "Saved!" replaces timer text, quick close
+  - Removed green success status box for cleaner UX
+
+- **v1.3.1**
+  - Centralized logging with debug flag toggle in settings
+  - Fixed XSS vulnerability in pinned-dialog.js
+  - Fixed memory leaks with AbortController cleanup
+  - Added path validation and filename sanitization in host.py
+  - Added input validation in options.js
+  - Created shared-constants.js for DRY code
+  - Added ESC key support to cancel screenshot selection
+
+- **v1.3.0**
+  - New markdown format with separate source, url, selectedText, notes fields
+
+- **v1.2.5**
   - Pin button toggles on/off with state persistence
   - Popup closes immediately when pin clicked
   - No accidental saves when toggling pin
@@ -631,13 +699,24 @@ For issues or questions:
 
 | Metric | Value |
 |--------|-------|
-| Total Lines of Code | ~1,624 |
+| Total Lines of Code | ~1,800 |
 | Test Coverage | 0% |
 | Issues Found | 20 |
-| Critical Issues | 2 |
-| High Priority | 6 |
-| Medium Priority | 8 |
+| Issues Fixed | 6 |
+| Critical Issues | 1 (1 resolved) |
+| High Priority | 4 (2 fixed) |
+| Medium Priority | 6 (2 fixed) |
 | Low Priority | 4 |
+
+**Fixes Applied (2025-11-25):**
+- ✅ Grammar API - Confirmed valid (newer than Claude's training cutoff)
+- ✅ Path Traversal - Added validation in `host.py`
+- ✅ XSS Vulnerability - Fixed in `pinned-dialog.js`
+- ✅ Console Logging - Centralized logger with debug flag
+- ✅ Input Validation - Added to `options.js`
+- ✅ Memory Leaks - Added AbortController in `pinned-dialog.js`
+
+**Note:** The OpenAI Responses API (`/v1/responses`) and `gpt-5-nano` model referenced in this codebase are valid - they were introduced after Claude's January 2025 training cutoff. The grammar correction feature is functional.
 
 **Files with Most Issues:** `background.js`, `pinned-dialog.js`, `popup.js`, `host.py`
 
@@ -651,27 +730,24 @@ For issues or questions:
 - **Impact:** Key is exposed to anyone with access to the code; could incur unauthorized charges
 - **Recommendation:** Rotate key immediately, move to secure storage (extension options or environment variable)
 
-#### 2. Dead/Broken Grammar Feature
+#### 2. ~~Dead/Broken Grammar Feature~~ **(RESOLVED - Valid API)**
 - **File:** `background.js:50-60`
-- **Issue:** Grammar correction uses non-existent OpenAI API endpoint (`/v1/responses`) and model (`gpt-5-nano`)
-- **Impact:** Feature is completely non-functional
-- **Recommendation:** Either implement correct OpenAI Chat Completions API or remove feature entirely
+- **Note:** The OpenAI Responses API (`/v1/responses`) and `gpt-5-nano` model are valid endpoints introduced after Claude's January 2025 training cutoff. This is a new API format and the feature is functional.
+- **Status:** No action required
 
 ---
 
 ### High Priority Issues
 
-#### 3. Path Traversal Vulnerability
+#### 3. ~~Path Traversal Vulnerability~~ **(FIXED)**
 - **File:** `host.py:187-189, 158-163`
 - **Issue:** No validation on `project_folder` or filenames before file operations
-- **Impact:** Malicious input could write files outside intended directory (e.g., `../../../etc/passwd`)
-- **Recommendation:** Sanitize paths, validate against allowed directory, reject special characters
+- **Fix Applied:** Added `validate_project_folder()`, `sanitize_filename()`, and `validate_entry()` functions. Now validates absolute paths, blocks system directories, removes path traversal attempts, and sanitizes filenames.
 
-#### 4. XSS Vulnerability
+#### 4. ~~XSS Vulnerability~~ **(FIXED)**
 - **File:** `pinned-dialog.js:208`
 - **Issue:** Using `innerHTML` with unsanitized filename data
-- **Impact:** Malicious filenames containing script tags could execute arbitrary JavaScript
-- **Recommendation:** Use `textContent` instead of `innerHTML`, or sanitize input
+- **Fix Applied:** Replaced `innerHTML` with safe DOM manipulation using `textContent` and `createElement()`.
 
 #### 5. Missing Null/Key Checks
 - **File:** `host.py:48-50`
@@ -718,11 +794,10 @@ For issues or questions:
 - **Impact:** No automated verification of functionality, regression risk on changes
 - **Recommendation:** Add Jest test suite for JavaScript, pytest for Python host
 
-#### 12. Excessive Console Logging
+#### 12. ~~Excessive Console Logging~~ **(FIXED)**
 - **File:** `background.js` (50+ log statements)
 - **Issue:** Heavy debug logging left in production code
-- **Impact:** Console clutter, potential performance impact, exposes internal state
-- **Recommendation:** Use structured logging with levels, disable debug in production
+- **Fix Applied:** Created centralized `logger.js` with debug flag system. Added debug toggle to extension settings (Options page). Logs now use consistent format `[UltraThink:Module]` and can be disabled via settings.
 
 #### 13. Global State Management
 - **Files:** All JavaScript files
@@ -736,11 +811,10 @@ For issues or questions:
 - **Impact:** Difficult to understand and maintain
 - **Recommendation:** Extract to named configuration constants
 
-#### 15. Incomplete Input Validation
+#### 15. ~~Incomplete Input Validation~~ **(FIXED)**
 - **File:** `options.js`
 - **Issue:** Only checks for empty path, no validation of path existence, permissions, or format
-- **Impact:** Silent failures when invalid path configured
-- **Recommendation:** Add comprehensive validation with user feedback
+- **Fix Applied:** Added `validateProjectFolder()` and `validateApiKey()` functions. Now validates absolute paths, blocks system directories, path traversal, and validates API key format.
 
 #### 16. Complex/Long Functions
 - **Files:** `background.js` (`handleSaveSingle` ~50 lines), `host.py` (`update_last_entry` ~70 lines)

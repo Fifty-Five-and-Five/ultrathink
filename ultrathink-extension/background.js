@@ -1,11 +1,13 @@
-// Native messaging host name
-const HOST_NAME = 'com.ultrathink.kbsaver';
+// Import shared constants and logger
+importScripts('shared-constants.js', 'logger.js');
 
-// Default settings
-const DEFAULT_SETTINGS = {
-  projectFolder: 'C:\\Users\\ChrisWright\\OneDrive - Fifty Five and Five\\dev\\ultrathink\\',
-  openaiKey: ''
-};
+// Initialize logger and create module-specific loggers
+initLogger();
+const grammarLog = createLogger('Grammar');
+const grammarUpdateLog = createLogger('GrammarUpdate');
+const screenshotLog = createLogger('Screenshot');
+const saveLog = createLogger('Save');
+const initLog = createLogger('Init');
 
 // Store screenshot temporarily
 let pendingScreenshot = null;
@@ -13,21 +15,21 @@ let pendingScreenshot = null;
 // Fix grammar using OpenAI Responses API
 async function fixGrammar(text, context = {}) {
   if (!text || text.trim().length === 0) {
-    console.log('[Grammar] Skipping empty text');
+    grammarLog.debug('Skipping empty text');
     return text;
   }
 
   // Get API key from storage
-  const settings = await chrome.storage.sync.get(DEFAULT_SETTINGS);
+  const settings = await getSettings();
   const apiKey = settings.openaiKey;
 
   if (!apiKey) {
-    console.log('[Grammar] No API key configured, skipping');
+    grammarLog.info('No API key configured, skipping');
     return text;
   }
 
-  console.log('[Grammar] Starting fix for text:', text.substring(0, 100) + '...');
-  console.log('[Grammar] Context:', context);
+  grammarLog.debug('Starting fix for text:', text.substring(0, 100) + '...');
+  grammarLog.debug('Context:', context);
 
   try {
     // Build context information for better corrections
@@ -52,7 +54,7 @@ async function fixGrammar(text, context = {}) {
 
     const prompt = `Fix spelling and grammar errors in this note and make it more coherent. ${contextInfo ? `${contextInfo}\n` : ''}Preserve technical terms, jargon, and domain-specific language. Return only the corrected text with no explanations, quotes, or additional commentary:\n\n${text}`;
 
-    console.log('[Grammar] Calling OpenAI API...');
+    grammarLog.debug('Calling OpenAI API...');
 
     const response = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST',
@@ -66,28 +68,28 @@ async function fixGrammar(text, context = {}) {
       })
     });
 
-    console.log('[Grammar] API response status:', response.status);
+    grammarLog.debug('API response status:', response.status);
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('[Grammar] API error:', response.status, errorText);
+      grammarLog.error('API error:', response.status, errorText);
       return text;
     }
 
     const data = await response.json();
-    console.log('[Grammar] API response:', data);
+    grammarLog.debug('API response:', data);
 
     // Extract text from raw API response (not using SDK, so no output_text helper)
     const outputMessage = data.output?.find(item => item.type === 'message');
     const textContent = outputMessage?.content?.find(c => c.type === 'output_text');
     const fixed = textContent?.text?.trim() || text;
 
-    console.log('[Grammar] Original:', text);
-    console.log('[Grammar] Fixed:', fixed);
+    grammarLog.debug('Original:', text);
+    grammarLog.debug('Fixed:', fixed);
 
     return fixed;
   } catch (error) {
-    console.error('[Grammar] Exception:', error);
+    grammarLog.error('Exception:', error);
     return text;
   }
 }
@@ -116,13 +118,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     pendingScreenshot = null; // Clear after retrieval
     return true;
   } else if (request.action === 'areaSelected') {
-    console.log('Area selected:', request.rect);
+    screenshotLog.debug('Area selected:', request.rect);
     captureAreaScreenshot(request.rect, sender.tab)
       .then(() => sendResponse({ success: true }))
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   } else if (request.action === 'captureFullScreen') {
-    console.log('Capture full screen triggered');
+    screenshotLog.info('Capture full screen triggered');
     captureScreenshot(sender.tab)
       .then(() => sendResponse({ success: true }))
       .catch(error => sendResponse({ success: false, error: error.message }));
@@ -135,12 +137,32 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   } else if (request.action === 'launchWidget') {
     // Launch the desktop widget via native messaging
     sendNativeMessage({ action: 'launch_widget' })
-      .then(result => sendResponse(result))
+      .then(result => {
+        // Track widget state in storage
+        chrome.storage.local.set({ widgetOpen: true });
+        sendResponse(result);
+      })
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   } else if (request.action === 'closeWidget') {
     // Close the desktop widget via native messaging
     sendNativeMessage({ action: 'close_widget' })
+      .then(result => {
+        // Track widget state in storage
+        chrome.storage.local.set({ widgetOpen: false });
+        sendResponse(result);
+      })
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  } else if (request.action === 'getWidgetState') {
+    // Return current widget state
+    chrome.storage.local.get(['widgetOpen'], (result) => {
+      sendResponse({ widgetOpen: result.widgetOpen || false });
+    });
+    return true;
+  } else if (request.action === 'browseFolder') {
+    // Open folder picker dialog via native host
+    sendNativeMessage({ action: 'browse_folder' })
       .then(result => sendResponse(result))
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
@@ -157,7 +179,7 @@ async function getTabGroupInfo(tab) {
         groupColor: group.color
       };
     } catch (error) {
-      console.error('Error getting tab group:', error);
+      saveLog.error('Error getting tab group:', error);
       return null;
     }
   }
@@ -167,10 +189,10 @@ async function getTabGroupInfo(tab) {
 // Handle single tab save
 async function handleSaveSingle(request) {
   try {
-    const settings = await chrome.storage.sync.get(DEFAULT_SETTINGS);
+    const settings = await getSettings();
     const projectFolder = settings.projectFolder || DEFAULT_SETTINGS.projectFolder;
 
-    const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    const timestamp = formatTimestamp();
     const tab = request.tab;
     const tabGroup = await getTabGroupInfo(tab);
 
@@ -216,7 +238,7 @@ async function handleSaveSingle(request) {
       throw new Error(response?.error || 'Native host returned error');
     }
   } catch (error) {
-    console.error('Background save error:', error);
+    saveLog.error('Background save error:', error);
     throw error;
   }
 }
@@ -224,14 +246,14 @@ async function handleSaveSingle(request) {
 // Fix grammar and update entry in background
 async function fixGrammarAndUpdate(projectFolder, timestamp, originalText, context = {}) {
   try {
-    console.log('[Grammar Update] Starting background fix...');
-    console.log('[Grammar Update] Timestamp:', timestamp);
+    grammarUpdateLog.debug('Starting background fix...');
+    grammarUpdateLog.debug('Timestamp:', timestamp);
 
     const fixedText = await fixGrammar(originalText, context);
 
     // Only update if text actually changed
     if (fixedText !== originalText) {
-      console.log('[Grammar Update] Text was changed, updating entry...');
+      grammarUpdateLog.debug('Text was changed, updating entry...');
 
       const updateMessage = {
         action: 'update_last_entry',
@@ -240,31 +262,31 @@ async function fixGrammarAndUpdate(projectFolder, timestamp, originalText, conte
         newContent: fixedText
       };
 
-      console.log('[Grammar Update] Sending update to host...');
+      grammarUpdateLog.debug('Sending update to host...');
       const response = await sendNativeMessage(updateMessage);
 
-      console.log('[Grammar Update] Host response:', response);
+      grammarUpdateLog.debug('Host response:', response);
 
       if (response && response.success) {
-        console.log('[Grammar Update] ✓ Entry updated successfully');
+        grammarUpdateLog.info('Entry updated successfully');
       } else {
-        console.error('[Grammar Update] ✗ Update failed:', response?.error);
+        grammarUpdateLog.error('Update failed:', response?.error);
       }
     } else {
-      console.log('[Grammar Update] No changes needed');
+      grammarUpdateLog.debug('No changes needed');
     }
   } catch (error) {
-    console.error('[Grammar Update] Error:', error);
+    grammarUpdateLog.error('Error:', error);
   }
 }
 
 // Handle bulk save of all tabs
 async function handleSaveAllTabs(request) {
   try {
-    const settings = await chrome.storage.sync.get(DEFAULT_SETTINGS);
+    const settings = await getSettings();
     const projectFolder = settings.projectFolder || DEFAULT_SETTINGS.projectFolder;
 
-    const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    const timestamp = formatTimestamp();
     let savedCount = 0;
 
     // Process each tab
@@ -295,13 +317,13 @@ async function handleSaveAllTabs(request) {
       if (response && response.success) {
         savedCount++;
       } else {
-        console.error(`Failed to save tab: ${tab.title}`);
+        saveLog.error('Failed to save tab:', tab.title);
       }
     }
 
     return { success: true, count: savedCount };
   } catch (error) {
-    console.error('Background bulk save error:', error);
+    saveLog.error('Background bulk save error:', error);
     throw error;
   }
 }
@@ -309,10 +331,10 @@ async function handleSaveAllTabs(request) {
 // Handle file save from pinned dialog
 async function handleFileSave(request, tab) {
   try {
-    const settings = await chrome.storage.sync.get(DEFAULT_SETTINGS);
+    const settings = await getSettings();
     const projectFolder = settings.projectFolder || DEFAULT_SETTINGS.projectFolder;
 
-    const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    const timestamp = formatTimestamp();
     const originalNotes = request.notes || '';
 
     // Build entry with new consistent format
@@ -370,7 +392,7 @@ async function handleFileSave(request, tab) {
       throw new Error(response?.error || 'Native host returned error');
     }
   } catch (error) {
-    console.error('File save error:', error);
+    saveLog.error('File save error:', error);
     throw error;
   }
 }
@@ -402,21 +424,21 @@ async function startScreenshotSelection() {
       files: ['selection-overlay.js']
     });
   } catch (error) {
-    console.error('Selection overlay injection error:', error);
+    screenshotLog.error('Selection overlay injection error:', error);
   }
 }
 
 // Capture full screenshot
 async function captureScreenshot(tab) {
   try {
-    console.log('captureScreenshot called', tab);
+    screenshotLog.debug('captureScreenshot called', tab);
     if (!tab) {
       [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     }
 
     // Capture visible tab
     const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
-    console.log('Screenshot captured, dataUrl length:', dataUrl.length);
+    screenshotLog.debug('Screenshot captured, dataUrl length:', dataUrl.length);
 
     // Store screenshot data
     pendingScreenshot = {
@@ -425,28 +447,28 @@ async function captureScreenshot(tab) {
       url: tab.url,
       title: tab.title
     };
-    console.log('Stored pendingScreenshot');
+    screenshotLog.debug('Stored pendingScreenshot');
 
     // Open popup
     const result = await chrome.action.openPopup();
-    console.log('Popup opened:', result);
+    screenshotLog.debug('Popup opened:', result);
   } catch (error) {
-    console.error('Screenshot capture error:', error);
+    screenshotLog.error('Screenshot capture error:', error);
   }
 }
 
 // Capture screenshot of selected area
 async function captureAreaScreenshot(rect, tab) {
   try {
-    console.log('captureAreaScreenshot called', rect, tab);
+    screenshotLog.debug('captureAreaScreenshot called', rect, tab);
 
     // Capture full visible tab first
     const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
-    console.log('Full screenshot captured, dataUrl length:', dataUrl.length);
+    screenshotLog.debug('Full screenshot captured, dataUrl length:', dataUrl.length);
 
     // Crop to selected area using canvas
     const croppedDataUrl = await cropImage(dataUrl, rect);
-    console.log('Cropped screenshot, dataUrl length:', croppedDataUrl.length);
+    screenshotLog.debug('Cropped screenshot, dataUrl length:', croppedDataUrl.length);
 
     // Store screenshot data
     pendingScreenshot = {
@@ -455,20 +477,20 @@ async function captureAreaScreenshot(rect, tab) {
       url: tab.url,
       title: tab.title
     };
-    console.log('Stored pendingScreenshot');
+    screenshotLog.debug('Stored pendingScreenshot');
 
     // Open popup
     const result = await chrome.action.openPopup();
-    console.log('Popup opened:', result);
+    screenshotLog.debug('Popup opened:', result);
   } catch (error) {
-    console.error('Area screenshot capture error:', error);
+    screenshotLog.error('Area screenshot capture error:', error);
   }
 }
 
 // Crop image to specified rectangle (service worker compatible)
 async function cropImage(dataUrl, rect) {
   try {
-    console.log('cropImage called with rect:', rect);
+    screenshotLog.debug('cropImage called with rect:', rect);
 
     // Convert data URL to blob
     const response = await fetch(dataUrl);
@@ -476,13 +498,13 @@ async function cropImage(dataUrl, rect) {
 
     // Decode image using createImageBitmap (service worker API)
     const imageBitmap = await createImageBitmap(blob);
-    console.log('Image loaded, dimensions:', imageBitmap.width, 'x', imageBitmap.height);
+    screenshotLog.debug('Image loaded, dimensions:', imageBitmap.width, 'x', imageBitmap.height);
 
     // Create OffscreenCanvas (available in service workers)
     const canvas = new OffscreenCanvas(rect.width, rect.height);
     const ctx = canvas.getContext('2d');
 
-    console.log('Canvas created:', canvas.width, 'x', canvas.height);
+    screenshotLog.debug('Canvas created:', canvas.width, 'x', canvas.height);
 
     // Draw cropped portion
     // sx, sy = source x, y (where to start cropping from)
@@ -495,7 +517,7 @@ async function cropImage(dataUrl, rect) {
       0, 0, rect.width, rect.height              // destination rectangle
     );
 
-    console.log('Image drawn to canvas');
+    screenshotLog.debug('Image drawn to canvas');
 
     // Convert canvas to blob
     const croppedBlob = await canvas.convertToBlob({ type: 'image/png' });
@@ -508,11 +530,11 @@ async function cropImage(dataUrl, rect) {
       reader.readAsDataURL(croppedBlob);
     });
 
-    console.log('Cropped image dataUrl length:', croppedDataUrl.length);
+    screenshotLog.debug('Cropped image dataUrl length:', croppedDataUrl.length);
     return croppedDataUrl;
 
   } catch (error) {
-    console.error('Image crop error:', error);
+    screenshotLog.error('Image crop error:', error);
     throw error;
   }
 }
@@ -520,5 +542,5 @@ async function cropImage(dataUrl, rect) {
 // Initialize default settings on install
 chrome.runtime.onInstalled.addListener(() => {
   chrome.storage.sync.set(DEFAULT_SETTINGS);
-  console.log('UltraThink extension installed');
+  initLog.info('UltraThink extension installed');
 });

@@ -1,3 +1,8 @@
+// Initialize logger
+initLogger();
+const pinLog = createLogger('Pin');
+const popupLog = createLogger('Popup');
+
 // Global state
 let countdown = 3;
 let timerInterval = null;
@@ -109,7 +114,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (selectedText) {
           // If text is selected, use snippet type
           document.getElementById('type').value = 'snippet';
-          // Show selected text as preview, but keep notes empty for user commentary
+          // Show selected text in preview area
+          document.getElementById('selectionPreview').textContent = selectedText;
+          document.getElementById('selectionPreview').style.display = 'block';
           document.getElementById('notes').placeholder = 'Add notes about this selection...';
         } else {
           // Otherwise, auto-detect type from URL
@@ -122,32 +129,28 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.getElementById('type').value = detectedType;
       }
     } catch (error) {
-      console.error('Error getting selected text:', error);
+      popupLog.error('Error getting selected text:', error);
       // Fall back to URL detection
       const detectedType = detectUrlType(tab.url);
       document.getElementById('type').value = detectedType;
     }
   }
 
-  // Check if pinned dialog already exists on page
+  // Check if widget is currently open
   try {
-    const [result] = await chrome.scripting.executeScript({
-      target: { tabId: currentTab.id },
-      func: () => !!document.getElementById('ultrathink-pinned-dialog')
-    });
-
-    if (result?.result) {
-      console.log('[Pin] Dialog already exists, marking button as pinned');
+    const widgetState = await chrome.runtime.sendMessage({ action: 'getWidgetState' });
+    if (widgetState?.widgetOpen) {
+      pinLog.debug('Widget is open, marking button as pinned');
       document.getElementById('pinBtn').classList.add('pinned');
     }
   } catch (error) {
-    console.log('[Pin] Could not check dialog state:', error.message);
+    pinLog.debug('Could not check widget state:', error.message);
   }
 
   // Setup checkbox handler
   document.getElementById('allTabsCheckbox').addEventListener('change', handleAllTabsToggle);
 
-  // Setup pin button handler (toggle desktop widget)
+  // Setup pin button handler (toggle pinned dialog on page)
   document.getElementById('pinBtn').addEventListener('click', async () => {
     // Stop auto-save timer immediately
     clearInterval(timerInterval);
@@ -155,28 +158,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     const pinBtn = document.getElementById('pinBtn');
     const isPinned = pinBtn.classList.contains('pinned');
 
-    console.log('[Pin] Button clicked, currently pinned:', isPinned);
+    pinLog.debug('Button clicked, currently pinned:', isPinned);
 
     try {
       if (isPinned) {
-        // Close widget via native messaging
-        const response = await chrome.runtime.sendMessage({ action: 'closeWidget' });
-        if (response && response.success) {
-          pinBtn.classList.remove('pinned');
-        }
+        // Close desktop widget
+        chrome.runtime.sendMessage({ action: 'closeWidget' });
+        pinBtn.classList.remove('pinned');
       } else {
-        // Launch widget via native messaging
-        const response = await chrome.runtime.sendMessage({ action: 'launchWidget' });
-        if (response && response.success) {
-          pinBtn.classList.add('pinned');
-        } else {
-          console.error('[Pin] Launch failed:', response?.error);
-        }
+        // Launch desktop widget
+        chrome.runtime.sendMessage({ action: 'launchWidget' });
+        pinBtn.classList.add('pinned');
       }
 
       window.close();
     } catch (error) {
-      console.error('[Pin] Error:', error);
+      pinLog.error('Error toggling widget:', error);
     }
   });
 
@@ -248,6 +245,7 @@ function resetTimer() {
 }
 
 async function saveEntry() {
+  const timerEl = document.getElementById('timer');
   const statusEl = document.getElementById('status');
   const checkbox = document.getElementById('allTabsCheckbox');
 
@@ -276,27 +274,21 @@ async function saveEntry() {
     const response = await chrome.runtime.sendMessage(saveRequest);
 
     if (response && response.success) {
-      if (checkbox.checked) {
-        statusEl.textContent = `Saved ${response.count || allTabs.length} tabs successfully!`;
-      } else {
-        statusEl.textContent = 'Saved successfully!';
-      }
-      statusEl.className = 'status success';
-
-      // Close popup after 1 second
+      // Show subtle "Saved!" in timer area, then close quickly
+      timerEl.textContent = 'Saved!';
       setTimeout(() => {
         window.close();
-      }, 1000);
+      }, 400);
     } else {
       throw new Error(response?.error || 'Failed to save');
     }
   } catch (error) {
-    console.error('Save error:', error);
+    popupLog.error('Save error:', error);
     statusEl.textContent = `Error: ${error.message}`;
     statusEl.className = 'status error';
 
     // Clear timer on error
     clearInterval(timerInterval);
-    document.getElementById('timer').textContent = '';
+    timerEl.textContent = '';
   }
 }

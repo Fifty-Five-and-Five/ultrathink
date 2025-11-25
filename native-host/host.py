@@ -8,9 +8,122 @@ import sys
 import json
 import struct
 import os
+import re
 import base64
 from pathlib import Path
 from datetime import datetime
+
+
+# =============================================================================
+# SECURITY: Path and Input Validation
+# =============================================================================
+
+# Blocked system directories (case-insensitive)
+BLOCKED_PATHS = [
+    'c:\\windows',
+    'c:\\program files',
+    'c:\\program files (x86)',
+    'c:\\programdata',
+    '/etc',
+    '/usr',
+    '/bin',
+    '/sbin',
+    '/var',
+]
+
+
+def validate_project_folder(project_folder):
+    """
+    Validate project folder is a safe, absolute path.
+    Returns (is_valid, normalized_path_or_error).
+    """
+    if not project_folder:
+        return False, "Project folder cannot be empty"
+
+    try:
+        folder_path = Path(project_folder).resolve()
+
+        # Must be absolute
+        if not folder_path.is_absolute():
+            return False, "Project folder must be an absolute path"
+
+        # Must exist and be a directory
+        if not folder_path.exists():
+            return False, f"Project folder does not exist: {project_folder}"
+
+        if not folder_path.is_dir():
+            return False, f"Project folder is not a directory: {project_folder}"
+
+        # Block system directories
+        folder_str = str(folder_path).lower()
+        for blocked in BLOCKED_PATHS:
+            if folder_str.startswith(blocked):
+                return False, f"Cannot use system directory: {folder_path}"
+
+        # Block path traversal attempts
+        if '..' in project_folder:
+            return False, "Path cannot contain '..'"
+
+        return True, folder_path
+
+    except Exception as e:
+        return False, f"Invalid path: {str(e)}"
+
+
+def sanitize_filename(filename):
+    """
+    Sanitize filename to prevent path traversal.
+    Returns sanitized filename.
+    """
+    if not filename:
+        return 'unnamed_file'
+
+    # Get just the basename (strip any path components)
+    basename = Path(filename).name
+
+    # Remove any remaining path separators and null bytes
+    basename = basename.replace('/', '').replace('\\', '').replace('\x00', '')
+
+    # Remove leading dots (hidden files / parent traversal)
+    basename = basename.lstrip('.')
+
+    # Whitelist: only allow alphanumeric, dash, underscore, dot, space
+    basename = re.sub(r'[^a-zA-Z0-9\-_\. ]', '_', basename)
+
+    # Limit length
+    if len(basename) > 200:
+        name_parts = basename.rsplit('.', 1)
+        if len(name_parts) == 2:
+            basename = name_parts[0][:190] + '.' + name_parts[1][:10]
+        else:
+            basename = basename[:200]
+
+    # Ensure not empty after sanitization
+    if not basename or basename == '.':
+        basename = 'unnamed_file'
+
+    return basename
+
+
+def validate_entry(entry):
+    """
+    Validate entry object has required fields.
+    Returns (is_valid, error_message).
+    """
+    if not isinstance(entry, dict):
+        return False, "Entry must be an object"
+
+    required_fields = ['type', 'captured', 'source']
+    for field in required_fields:
+        if field not in entry:
+            return False, f"Missing required field: {field}"
+
+    # Validate timestamp format (YYYY-MM-DD HH:MM:SS)
+    timestamp = entry.get('captured', '')
+    if not re.match(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$', timestamp):
+        return False, f"Invalid timestamp format: {timestamp}"
+
+    return True, None
 
 
 def read_message():
@@ -119,8 +232,14 @@ def save_screenshot(project_folder, screenshot_data_url, timestamp):
     """Save screenshot image to file."""
     log_file = Path(__file__).parent / 'host.log'
     try:
-        # Create screenshots folder if it doesn't exist
-        folder_path = Path(project_folder)
+        # Validate project folder
+        is_valid, result = validate_project_folder(project_folder)
+        if not is_valid:
+            with open(log_file, 'a', encoding='utf-8') as f:
+                f.write(f"{datetime.now()}: Screenshot validation error: {result}\n")
+            return None
+
+        folder_path = result  # result is the validated Path object
         screenshots_folder = folder_path / 'screenshots'
         screenshots_folder.mkdir(exist_ok=True)
 
@@ -157,8 +276,14 @@ def save_file(project_folder, file_data_url, filename, timestamp):
     """Save uploaded file to /files folder."""
     log_file = Path(__file__).parent / 'host.log'
     try:
-        # Create files folder if it doesn't exist
-        folder_path = Path(project_folder)
+        # Validate project folder
+        is_valid, result = validate_project_folder(project_folder)
+        if not is_valid:
+            with open(log_file, 'a', encoding='utf-8') as f:
+                f.write(f"{datetime.now()}: File save validation error: {result}\n")
+            return None
+
+        folder_path = result  # result is the validated Path object
         files_folder = folder_path / 'files'
         files_folder.mkdir(exist_ok=True)
 
@@ -171,13 +296,16 @@ def save_file(project_folder, file_data_url, filename, timestamp):
         # Decode base64 to binary
         file_data = base64.b64decode(base64_data)
 
+        # Sanitize filename to prevent path traversal
+        safe_base = sanitize_filename(filename)
+
         # Generate filename with timestamp to avoid collisions
-        name_parts = filename.rsplit('.', 1)
+        name_parts = safe_base.rsplit('.', 1)
         if len(name_parts) == 2:
             base_name, extension = name_parts
             safe_filename = f"{base_name}_{timestamp.replace(' ', '_').replace(':', '-')}.{extension}"
         else:
-            safe_filename = f"{filename}_{timestamp.replace(' ', '_').replace(':', '-')}"
+            safe_filename = f"{safe_base}_{timestamp.replace(' ', '_').replace(':', '-')}"
 
         file_path = files_folder / safe_filename
 
@@ -200,10 +328,17 @@ def save_file(project_folder, file_data_url, filename, timestamp):
 def append_to_kb(project_folder, entry):
     """Append entry to kb.md file (at the top)."""
     try:
-        # Ensure project folder exists
-        folder_path = Path(project_folder)
-        if not folder_path.exists():
-            return {'success': False, 'error': f'Project folder does not exist: {project_folder}'}
+        # Validate project folder
+        is_valid, result = validate_project_folder(project_folder)
+        if not is_valid:
+            return {'success': False, 'error': result}
+
+        folder_path = result  # result is the validated Path object
+
+        # Validate entry structure
+        is_valid, error = validate_entry(entry)
+        if not is_valid:
+            return {'success': False, 'error': error}
 
         kb_file = folder_path / 'kb.md'
 
@@ -254,9 +389,12 @@ def append_to_kb(project_folder, entry):
 def update_last_entry(project_folder, timestamp, new_content):
     """Update the content of the most recent entry with matching timestamp."""
     try:
-        folder_path = Path(project_folder)
-        if not folder_path.exists():
-            return {'success': False, 'error': f'Project folder does not exist: {project_folder}'}
+        # Validate project folder
+        is_valid, result = validate_project_folder(project_folder)
+        if not is_valid:
+            return {'success': False, 'error': result}
+
+        folder_path = result  # result is the validated Path object
 
         kb_file = folder_path / 'kb.md'
 
@@ -374,6 +512,30 @@ def close_widget():
         return {'success': False, 'error': str(e)}
 
 
+def browse_folder():
+    """Open folder picker dialog and return selected path."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+
+        root = tk.Tk()
+        root.withdraw()  # Hide main window
+        root.attributes('-topmost', True)  # Bring dialog to front
+
+        folder = filedialog.askdirectory(title="Select UltraThink Project Folder")
+        root.destroy()
+
+        if folder:
+            # Normalize to Windows path with trailing backslash
+            folder = folder.replace('/', '\\')
+            if not folder.endswith('\\'):
+                folder += '\\'
+            return {'success': True, 'path': folder}
+        return {'success': False, 'error': 'No folder selected'}
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
+
 def main():
     """Main loop for native messaging."""
     # Log to file for debugging (optional)
@@ -410,6 +572,9 @@ def main():
                 send_message(result)
             elif message.get('action') == 'close_widget':
                 result = close_widget()
+                send_message(result)
+            elif message.get('action') == 'browse_folder':
+                result = browse_folder()
                 send_message(result)
             else:
                 send_message({'success': False, 'error': 'Unknown action'})

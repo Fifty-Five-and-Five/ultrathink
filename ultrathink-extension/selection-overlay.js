@@ -1,13 +1,23 @@
 // Selection overlay for screenshot area capture
 (function() {
-  console.log('Selection overlay loaded');
+  // Inline logger for content script
+  const DEBUG_ENABLED = false; // Set to true for debugging
+  const log = {
+    debug: (...args) => DEBUG_ENABLED && console.log('[UltraThink:Overlay] DEBUG |', ...args),
+    info: (...args) => DEBUG_ENABLED && console.log('[UltraThink:Overlay] INFO |', ...args),
+    warn: (...args) => console.warn('[UltraThink:Overlay] WARN |', ...args),
+    error: (...args) => console.error('[UltraThink:Overlay] ERROR |', ...args)
+  };
+
+  log.info('Selection overlay loaded');
   let startX, startY, endX, endY;
   let isSelecting = false;
   let overlay, selectionBox;
   let selectionComplete = false;
+  let autoCapTimeout = null;
 
   function createOverlay() {
-    console.log('Creating overlay');
+    log.debug('Creating overlay');
     // Create semi-transparent overlay
     overlay = document.createElement('div');
     overlay.style.cssText = `
@@ -39,12 +49,23 @@
     overlay.addEventListener('mousemove', handleMouseMove);
     overlay.addEventListener('mouseup', handleMouseUp);
 
+    // Add ESC key support to cancel
+    document.addEventListener('keydown', handleKeyDown);
+
     // Auto-capture after 2 seconds if no interaction
-    setTimeout(() => {
+    autoCapTimeout = setTimeout(() => {
       if (!selectionComplete) {
         captureFullScreen();
       }
     }, 2000);
+  }
+
+  function handleKeyDown(e) {
+    if (e.key === 'Escape') {
+      log.debug('ESC pressed, canceling selection');
+      selectionComplete = true; // Prevent auto-capture
+      cleanup();
+    }
   }
 
   function handleMouseDown(e) {
@@ -94,35 +115,44 @@
 
     // Wait for DOM to update before capturing
     setTimeout(() => {
-      console.log('Sending areaSelected message', rect);
+      log.debug('Sending areaSelected message', rect);
       chrome.runtime.sendMessage({
         action: 'areaSelected',
         rect: rect
       }, (response) => {
-        console.log('areaSelected response:', response);
+        log.debug('areaSelected response:', response);
       });
     }, 100);
   }
 
   function captureFullScreen() {
-    console.log('captureFullScreen called');
+    log.debug('captureFullScreen called');
     selectionComplete = true;
     cleanup();
 
     // Wait for overlay to be removed before capturing
     setTimeout(() => {
-      console.log('Sending captureFullScreen message');
+      log.debug('Sending captureFullScreen message');
       chrome.runtime.sendMessage({
         action: 'captureFullScreen'
       }, (response) => {
-        console.log('captureFullScreen response:', response);
+        log.debug('captureFullScreen response:', response);
       });
     }, 100);
   }
 
   function cleanup() {
+    // Clear timeout
+    if (autoCapTimeout) {
+      clearTimeout(autoCapTimeout);
+      autoCapTimeout = null;
+    }
+    // Remove keydown listener
+    document.removeEventListener('keydown', handleKeyDown);
+    // Remove overlay elements
     if (overlay) overlay.remove();
     if (selectionBox) selectionBox.remove();
+    log.debug('Overlay cleaned up');
   }
 
   // Start the overlay

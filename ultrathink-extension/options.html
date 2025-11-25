@@ -28,6 +28,17 @@
       color: #555;
     }
 
+    .checkbox-label {
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+    }
+
+    .checkbox-label input[type="checkbox"] {
+      width: auto;
+      margin-right: 8px;
+    }
+
     input[type="text"],
     input[type="password"] {
       width: 100%;
@@ -46,7 +57,7 @@
     }
 
     button {
-      background: #0066cc;
+      background: #ff5200;
       color: white;
       border: none;
       padding: 10px 20px;
@@ -58,7 +69,48 @@
     }
 
     button:hover {
-      background: #0052a3;
+      background: #e04900;
+    }
+
+    button.browse {
+      background: #e0e0e0;
+      color: #333;
+      padding: 8px 12px;
+      font-size: 13px;
+    }
+
+    button.browse:hover {
+      background: #d0d0d0;
+    }
+
+    .input-with-button {
+      display: flex;
+      gap: 8px;
+    }
+
+    .input-with-button input {
+      flex: 1;
+    }
+
+    .shortcuts-section {
+      margin-top: 24px;
+      padding-top: 24px;
+      border-top: 1px solid #ddd;
+    }
+
+    .shortcut-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+    }
+
+    .shortcut-key {
+      font-family: 'Courier New', monospace;
+      background: #f0f0f0;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 13px;
     }
 
     .status {
@@ -75,6 +127,12 @@
       display: block;
     }
 
+    .status.error {
+      background: #f8d7da;
+      color: #721c24;
+      display: block;
+    }
+
     .example {
       background: #f5f5f5;
       padding: 12px;
@@ -87,31 +145,59 @@
   </style>
 </head>
 <body>
-  <h1>UltraThink Settings</h1>
+  <h1>Ultrathink settings</h1>
 
   <div class="field">
-    <label for="projectFolder">Project Folder Path:</label>
-    <input type="text" id="projectFolder" placeholder="C:\Users\YourName\path\to\project\">
+    <label for="projectFolder">Project folder path:</label>
+    <div class="input-with-button">
+      <input type="text" id="projectFolder" placeholder="C:\Users\YourName\path\to\project\">
+      <button type="button" id="browseBtn" class="browse">Browse...</button>
+    </div>
     <div class="help-text">
       The folder where kb.md will be saved. Must end with a backslash (\).
-    </div>
-    <div class="example">
-      Example: C:\Users\ChrisWright\OneDrive - Fifty Five and Five\dev\ultrathink\
     </div>
   </div>
 
   <div class="field">
-    <label for="openaiKey">OpenAI API Key:</label>
+    <label for="openaiKey">OpenAI API key:</label>
     <input type="password" id="openaiKey" placeholder="sk-proj-...">
     <div class="help-text">
       Optional. Used for grammar fixing on saved notes. Get your key from <a href="https://platform.openai.com/api-keys" target="_blank">OpenAI</a>.
     </div>
   </div>
 
-  <button id="saveBtn">Save Settings</button>
+  <div class="field">
+    <label class="checkbox-label">
+      <input type="checkbox" id="debugMode">
+      Enable debug logging
+    </label>
+    <div class="help-text">
+      When enabled, detailed debug logs appear in the browser console (DevTools → Console).
+      Filter by "UltraThink" to see extension logs only.
+    </div>
+  </div>
+
+  <button id="saveBtn">Save</button>
+
+  <div class="shortcuts-section">
+    <h2 style="font-size: 18px; margin-bottom: 16px; color: #333;">Keyboard Shortcuts</h2>
+    <div class="shortcut-row">
+      <span>Open save popup</span>
+      <span class="shortcut-key">Ctrl+Shift+4</span>
+    </div>
+    <div class="shortcut-row">
+      <span>Capture screenshot</span>
+      <span class="shortcut-key">Ctrl+Shift+5</span>
+    </div>
+    <div class="help-text" style="margin-top: 12px;">
+      Shortcuts can only be changed through Chrome's extension settings.
+    </div>
+    <button type="button" id="shortcutsBtn" style="margin-top: 12px;">Customise</button>
+  </div>
 
   <div class="status" id="status"></div>
 
+  <script src="shared-constants.js"></script>
   <script src="options.js"></script>
 </body>
 </html>

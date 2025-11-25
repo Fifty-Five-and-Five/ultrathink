@@ -101,6 +101,20 @@
       text-overflow: ellipsis;
     }
 
+    .selection-preview {
+      font-size: 12px;
+      color: #666;
+      margin-bottom: 8px;
+      padding: 8px;
+      background: #f5f5f5;
+      border-radius: 4px;
+      max-height: 80px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      display: none;
+    }
+
     .timer-row {
       display: flex;
       align-items: center;
@@ -199,7 +213,7 @@
           <circle cx="12" cy="12" r="10"/>
         </svg>
       </button>
-      <span class="version">v1.2.5</span>
+      <span class="version">v1.5.1</span>
     </div>
   </div>
 
@@ -213,6 +227,8 @@
   </div>
 
   <div class="url-preview" id="urlPreview">Loading...</div>
+
+  <div class="selection-preview" id="selectionPreview"></div>
 
   <div class="field">
     <select id="type">
@@ -244,6 +260,7 @@
 
   <div class="status" id="status"></div>
 
+  <script src="logger.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>
