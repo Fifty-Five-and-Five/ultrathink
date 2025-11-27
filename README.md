@@ -384,7 +384,15 @@ Each entry in `kb.md` looks like this:
 
 ## Version History
 
-- **v2.3.0** (Current)
+- **v2.4.0** (Current)
+  - Settings consolidation: API keys and AI prompts moved from extension to `native-host/settings.json`
+  - Extension options page simplified to folder path and debug mode only
+  - System tray support: Widget runs in background with tray menu
+  - Extension ID setup dialog: First-run configuration for native messaging
+  - Virtual desktop pinning: Widget pins to all Windows virtual desktops (replaces multi-monitor mirrors)
+  - Web viewer integration: Open KB viewer from system tray menu
+
+- **v2.3.0**
   - Capsule CRM integration: Search contacts, organisations, opportunities, tasks, and projects
   - New Capsule CRM checkbox in Search page
   - Configurable via `capsule_token` in `native-host/settings.json`

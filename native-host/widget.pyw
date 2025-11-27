@@ -11,7 +11,8 @@ from pathlib import Path
 from datetime import datetime
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QTextEdit, QFrame, QSizeGrip, QCheckBox
+    QLabel, QPushButton, QTextEdit, QFrame, QSizeGrip, QCheckBox,
+    QSystemTrayIcon, QMenu, QDialog, QLineEdit, QMessageBox
 )
 from PyQt6.QtCore import Qt, QTimer, QSize, QEvent, QRect, pyqtSignal
 from PyQt6.QtGui import QCursor, QGuiApplication, QPixmap, QPainter, QColor, QPen, QShortcut, QKeySequence, QTextCursor, QIcon, QFont, QTextCharFormat
@@ -47,6 +48,9 @@ except ImportError:
     SVG_AVAILABLE = False
 
 import shutil
+import webbrowser
+import http.server
+import socketserver
 
 # Import save functions from host.py
 sys.path.insert(0, str(Path(__file__).parent))
@@ -65,6 +69,178 @@ def load_settings():
     except Exception:
         pass
     return {}
+
+
+def save_settings(settings):
+    """Save settings to settings.json"""
+    settings_file = Path(__file__).parent / 'settings.json'
+    try:
+        with open(settings_file, 'w') as f:
+            json.dump(settings, f, indent=2)
+        return True
+    except Exception:
+        return False
+
+
+def generate_native_manifest(ext_id):
+    """Generate the native messaging manifest with the extension ID."""
+    import sys
+
+    # Get correct path for frozen vs dev mode
+    if getattr(sys, 'frozen', False):
+        host_path = str(Path(sys.executable).parent / 'host.exe')
+    else:
+        host_path = str(Path(__file__).parent / 'host.bat')
+
+    manifest = {
+        "name": "com.ultrathink.kbsaver",
+        "description": "UltraThink Knowledge Base Saver",
+        "path": host_path,
+        "type": "stdio",
+        "allowed_origins": [f"chrome-extension://{ext_id}/"]
+    }
+
+    manifest_path = Path(host_path).parent / 'com.ultrathink.kbsaver.json'
+    try:
+        with open(manifest_path, 'w') as f:
+            json.dump(manifest, f, indent=2)
+        return True
+    except Exception:
+        return False
+
+
+class ExtensionIdDialog(QDialog):
+    """Dialog for configuring the Chrome/Edge extension ID."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("UltraThink Setup")
+        self.setFixedSize(450, 200)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # Instructions
+        instructions = QLabel(
+            "To connect UltraThink to your browser extension:\n\n"
+            "1. Open edge://extensions (or chrome://extensions)\n"
+            "2. Find UltraThink and copy the Extension ID\n"
+            "3. Paste it below:"
+        )
+        instructions.setWordWrap(True)
+        layout.addWidget(instructions)
+
+        # Input field
+        self.id_input = QLineEdit()
+        self.id_input.setPlaceholderText("e.g., nnkkelcnmgdajljbpnciamcljdbcjdfi")
+        self.id_input.setMinimumHeight(32)
+        layout.addWidget(self.id_input)
+
+        # Buttons
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+
+        self.save_btn = QPushButton("Save")
+        self.save_btn.setMinimumWidth(80)
+        self.save_btn.clicked.connect(self.save_extension_id)
+        button_layout.addWidget(self.save_btn)
+
+        self.skip_btn = QPushButton("Skip")
+        self.skip_btn.setMinimumWidth(80)
+        self.skip_btn.clicked.connect(self.reject)
+        button_layout.addWidget(self.skip_btn)
+
+        layout.addLayout(button_layout)
+
+        # Load existing ID if any
+        settings = load_settings()
+        if settings.get('extension_id'):
+            self.id_input.setText(settings['extension_id'])
+
+    def save_extension_id(self):
+        """Validate and save the extension ID."""
+        ext_id = self.id_input.text().strip().lower()
+
+        # Validate format (32 lowercase alphanumeric characters)
+        if not ext_id:
+            QMessageBox.warning(self, "Error", "Please enter an extension ID.")
+            return
+
+        if len(ext_id) != 32 or not ext_id.isalnum():
+            QMessageBox.warning(
+                self, "Error",
+                "Extension ID must be exactly 32 alphanumeric characters.\n"
+                "Example: nnkkelcnmgdajljbpnciamcljdbcjdfi"
+            )
+            return
+
+        # Save to settings
+        settings = load_settings()
+        settings['extension_id'] = ext_id
+        if save_settings(settings):
+            # Generate native manifest
+            if generate_native_manifest(ext_id):
+                QMessageBox.information(
+                    self, "Success",
+                    "Extension ID saved!\n\n"
+                    "You may need to reload the extension in your browser."
+                )
+                self.accept()
+            else:
+                QMessageBox.warning(self, "Error", "Failed to generate manifest file.")
+        else:
+            QMessageBox.warning(self, "Error", "Failed to save settings.")
+
+
+# Web server for KB viewer
+WEB_SERVER = None
+WEB_SERVER_PORT = 8080
+
+
+def start_web_server():
+    """Start the kb-server in a background thread."""
+    global WEB_SERVER
+
+    # Import the kb-server module
+    project_folder = Path(__file__).parent.parent
+    sys.path.insert(0, str(project_folder))
+
+    try:
+        # Import kb-server's handler
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("kb_server", project_folder / "kb-server.py")
+        kb_server = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(kb_server)
+
+        # Change to project folder so relative paths work
+        os.chdir(project_folder)
+
+        # Create server
+        WEB_SERVER = http.server.HTTPServer(('', WEB_SERVER_PORT), kb_server.KBHandler)
+
+        # Run in thread
+        server_thread = threading.Thread(target=WEB_SERVER.serve_forever, daemon=True)
+        server_thread.start()
+
+        return True
+    except Exception as e:
+        print(f"Failed to start web server: {e}")
+        return False
+
+
+def stop_web_server():
+    """Stop the web server."""
+    global WEB_SERVER
+    if WEB_SERVER:
+        WEB_SERVER.shutdown()
+        WEB_SERVER = None
+
+
+def open_web_viewer():
+    """Open the KB viewer in default browser."""
+    webbrowser.open(f'http://localhost:{WEB_SERVER_PORT}')
 
 
 # Load settings
@@ -1917,7 +2093,7 @@ class UltraThinkWidget(QWidget):
                 }}
             """)
             self.monitor_btn.setIcon(create_icon_from_svg(ICON_MONITOR, 16, "#fff"))
-            self.monitor_btn.setToolTip("Showing on all monitors (click to disable)")
+            self.monitor_btn.setToolTip("Pinned to all virtual desktops (click to unpin)")
         else:
             # Inactive state
             self.monitor_btn.setStyleSheet("""
@@ -1930,50 +2106,86 @@ class UltraThinkWidget(QWidget):
                 }
             """)
             self.monitor_btn.setIcon(create_icon_from_svg(ICON_MONITOR, 16, "#666"))
-            self.monitor_btn.setToolTip("Show on all monitors")
+            self.monitor_btn.setToolTip("Pin to all virtual desktops")
 
     def toggle_multi_monitor(self):
-        """Toggle display on all monitors."""
+        """Toggle pinning to all virtual desktops."""
         self.multi_monitor_enabled = not self.multi_monitor_enabled
         self._update_monitor_btn_style()
 
         if self.multi_monitor_enabled:
-            self._create_mirror_widgets()
+            self._pin_to_all_desktops()
         else:
-            self._destroy_mirror_widgets()
+            self._unpin_from_all_desktops()
 
-    def _create_mirror_widgets(self):
-        """Create mirror widgets on all other screens."""
-        screens = QGuiApplication.screens()
-        primary_screen = QGuiApplication.primaryScreen()
+    def _pin_to_all_desktops(self):
+        """Pin widget to all Windows virtual desktops."""
+        try:
+            import ctypes
+            from ctypes import wintypes
 
-        # Get current position relative to primary screen
-        current_pos = self.pos()
-        current_size = self.size()
+            # Get the window handle
+            hwnd = int(self.winId())
 
-        # Calculate position as percentage of screen for consistent placement
-        primary_geo = primary_screen.geometry()
-        rel_x = (current_pos.x() - primary_geo.x()) / primary_geo.width()
-        rel_y = (current_pos.y() - primary_geo.y()) / primary_geo.height()
+            # Use SetWindowLong to add WS_EX_TOOLWINDOW style
+            # This makes the window appear on all virtual desktops
+            GWL_EXSTYLE = -20
+            WS_EX_TOOLWINDOW = 0x00000080
+            WS_EX_APPWINDOW = 0x00040000
 
-        for screen in screens:
-            if screen == primary_screen:
-                continue  # Skip primary - main widget is there
+            user32 = ctypes.windll.user32
 
-            # Create a simple mirror widget for this screen
-            mirror = MirrorWidget(self)
-            mirror.resize(current_size)
+            # Get current extended style
+            current_style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
 
-            # Position relative to this screen
-            screen_geo = screen.geometry()
-            x = screen_geo.x() + int(rel_x * screen_geo.width())
-            y = screen_geo.y() + int(rel_y * screen_geo.height())
-            mirror.move(x, y)
-            mirror.show()
-            self.mirror_widgets.append(mirror)
+            # Add TOOLWINDOW and remove APPWINDOW to pin to all desktops
+            new_style = (current_style | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW
+            user32.SetWindowLongW(hwnd, GWL_EXSTYLE, new_style)
+
+            # Force window to update
+            SWP_FRAMECHANGED = 0x0020
+            SWP_NOMOVE = 0x0002
+            SWP_NOSIZE = 0x0001
+            SWP_NOZORDER = 0x0004
+            user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0,
+                               SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER)
+
+        except Exception as e:
+            print(f"Failed to pin to all desktops: {e}")
+
+    def _unpin_from_all_desktops(self):
+        """Unpin widget from all virtual desktops (show only on current)."""
+        try:
+            import ctypes
+
+            hwnd = int(self.winId())
+
+            GWL_EXSTYLE = -20
+            WS_EX_TOOLWINDOW = 0x00000080
+            WS_EX_APPWINDOW = 0x00040000
+
+            user32 = ctypes.windll.user32
+
+            # Get current extended style
+            current_style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+
+            # Remove TOOLWINDOW and add APPWINDOW to unpin
+            new_style = (current_style & ~WS_EX_TOOLWINDOW) | WS_EX_APPWINDOW
+            user32.SetWindowLongW(hwnd, GWL_EXSTYLE, new_style)
+
+            # Force window to update
+            SWP_FRAMECHANGED = 0x0020
+            SWP_NOMOVE = 0x0002
+            SWP_NOSIZE = 0x0001
+            SWP_NOZORDER = 0x0004
+            user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0,
+                               SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER)
+
+        except Exception as e:
+            print(f"Failed to unpin from desktops: {e}")
 
     def _destroy_mirror_widgets(self):
-        """Close and remove all mirror widgets."""
+        """Close and remove all mirror widgets (legacy cleanup)."""
         for mirror in self.mirror_widgets:
             mirror.close()
         self.mirror_widgets.clear()
@@ -2134,15 +2346,74 @@ def main():
         pass
 
     app = QApplication(sys.argv)
-    app.setQuitOnLastWindowClosed(True)
+    app.setQuitOnLastWindowClosed(False)  # Keep running in system tray
 
     # Set application icon
     icon_path = Path(__file__).parent.parent / 'ultrathink-extension' / 'icons' / 'icon128.png'
     if icon_path.exists():
         app.setWindowIcon(QIcon(str(icon_path)))
 
+    # Check if extension ID is configured - show setup dialog if not
+    settings = load_settings()
+    if not settings.get('extension_id'):
+        dialog = ExtensionIdDialog()
+        dialog.exec()  # Show dialog, user can skip if they want
+
+    # Start web server for KB viewer
+    server_started = start_web_server()
+
+    # Create main widget
     widget = UltraThinkWidget()
+
+    # Create system tray icon
+    tray = QSystemTrayIcon(app)
+    tray.setIcon(app.windowIcon())
+    tray.setToolTip("UltraThink")
+
+    # Create tray menu
+    tray_menu = QMenu()
+
+    show_action = tray_menu.addAction("Show Widget")
+    show_action.triggered.connect(widget.show)
+
+    hide_action = tray_menu.addAction("Hide Widget")
+    hide_action.triggered.connect(widget.hide)
+
+    tray_menu.addSeparator()
+
+    # Web viewer option
+    if server_started:
+        web_action = tray_menu.addAction("Open Web Viewer")
+        web_action.triggered.connect(open_web_viewer)
+        tray_menu.addSeparator()
+
+    settings_action = tray_menu.addAction("Settings...")
+    settings_action.triggered.connect(lambda: ExtensionIdDialog(widget).exec())
+
+    tray_menu.addSeparator()
+
+    quit_action = tray_menu.addAction("Exit")
+    quit_action.triggered.connect(app.quit)
+
+    tray.setContextMenu(tray_menu)
+    tray.show()
+
+    # Double-click on tray icon toggles widget visibility
+    def on_tray_activated(reason):
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            if widget.isVisible():
+                widget.hide()
+            else:
+                widget.show()
+                widget.raise_()
+                widget.activateWindow()
+
+    tray.activated.connect(on_tray_activated)
+
     widget.show()
+
+    # Cleanup on exit
+    app.aboutToQuit.connect(stop_web_server)
 
     sys.exit(app.exec())
 

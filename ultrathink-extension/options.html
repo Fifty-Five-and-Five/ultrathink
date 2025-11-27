@@ -155,32 +155,6 @@
       line-height: 1.4;
     }
 
-    .collapsible-header {
-      display: flex;
-      align-items: center;
-      cursor: pointer;
-      user-select: none;
-      padding: 8px 0;
-    }
-
-    .collapsible-header:hover {
-      color: #ff5200;
-    }
-
-    .collapsible-arrow {
-      margin-right: 8px;
-      transition: transform 0.2s;
-    }
-
-    .collapsible-content {
-      display: none;
-      padding-top: 12px;
-    }
-
-    .collapsible-content.open {
-      display: block;
-    }
-
     .placeholder-tag {
       display: inline-block;
       background: #e8f4fd;
@@ -203,27 +177,72 @@
     .reset-btn:hover {
       background: #d0d0d0;
     }
+
+    .quick-links {
+      background: #f8f9fa;
+      border: 1px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 24px;
+    }
+
+    .quick-links h2 {
+      font-size: 14px;
+      margin: 0 0 12px 0;
+      color: #333;
+    }
+
+    .quick-links ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    .quick-links li {
+      margin-bottom: 8px;
+    }
+
+    .quick-links a {
+      color: #ff5200;
+      text-decoration: none;
+      font-size: 13px;
+    }
+
+    .quick-links a:hover {
+      text-decoration: underline;
+    }
+
+    .quick-links .link-desc {
+      color: #666;
+      font-size: 12px;
+      margin-left: 8px;
+    }
   </style>
 </head>
 <body>
   <h1>Ultrathink settings</h1>
 
+  <div class="quick-links">
+    <h2>Quick links</h2>
+    <ul>
+      <li><a href="#general">General</a> <span class="link-desc">- folder path, debug mode</span></li>
+      <li><a href="#shortcuts">Keyboard shortcuts</a> <span class="link-desc">- hotkeys for quick capture</span></li>
+    </ul>
+    <div class="help-text" style="margin-top: 12px;">
+      External integrations (GitHub, Notion, Fastmail), API keys and AI prompts are configured in the <strong>KB Viewer Settings</strong> page.
+    </div>
+  </div>
+
+  <h2 id="general" style="font-size: 18px; margin-bottom: 16px; color: #333;">General</h2>
+
   <div class="field">
-    <label for="projectFolder">Project folder path:</label>
+    <label for="projectFolder">Project folder path</label>
     <div class="input-with-button">
       <input type="text" id="projectFolder" placeholder="C:\Users\YourName\path\to\project\">
       <button type="button" id="browseBtn" class="browse">Browse...</button>
     </div>
     <div class="help-text">
       The folder where kb.md will be saved. Must end with a backslash (\).
-    </div>
-  </div>
-
-  <div class="field">
-    <label for="openaiKey">OpenAI API key:</label>
-    <input type="password" id="openaiKey" placeholder="sk-proj-...">
-    <div class="help-text">
-      Optional. Used for grammar fixing on saved notes. Get your key from <a href="https://platform.openai.com/api-keys" target="_blank">OpenAI</a>.
     </div>
   </div>
 
@@ -238,70 +257,10 @@
     </div>
   </div>
 
-  <h2 style="font-size: 18px; margin-top: 32px; margin-bottom: 16px; color: #333; border-top: 1px solid #ddd; padding-top: 24px;">External Integrations</h2>
-
-  <div class="field">
-    <label for="githubToken">GitHub Personal Access Token:</label>
-    <input type="password" id="githubToken" placeholder="ghp_...">
-    <div class="help-text">
-      Used to search your GitHub repos for related issues/commits. Create a token at
-      <a href="https://github.com/settings/tokens?type=beta" target="_blank">GitHub Settings</a>
-      with read access to your repositories.
-    </div>
-  </div>
-
-  <div class="field">
-    <label for="githubRepos">GitHub Repositories to Search:</label>
-    <input type="text" id="githubRepos" placeholder="owner/repo1, owner/repo2">
-    <div class="help-text">
-      Comma-separated list of repositories to search. Leave empty to search all accessible repos.
-    </div>
-    <div class="example">Example: anthropics/claude-code, myuser/my-project</div>
-  </div>
-
-  <h2 style="font-size: 18px; margin-top: 32px; margin-bottom: 16px; color: #333; border-top: 1px solid #ddd; padding-top: 24px;">AI Prompts</h2>
-
-  <div class="field">
-    <div class="collapsible-header" onclick="toggleCollapsible('classificationPrompt')">
-      <span class="collapsible-arrow" id="classificationPromptArrow">▶</span>
-      <label style="margin: 0; cursor: pointer;">Classification Prompt</label>
-    </div>
-    <div class="collapsible-content" id="classificationPromptContent">
-      <div class="help-text" style="margin-bottom: 8px;">
-        Customise how entries are classified as project/task/knowledge. Available placeholders:
-        <span class="placeholder-tag">{title}</span>
-        <span class="placeholder-tag">{url}</span>
-        <span class="placeholder-tag">{content}</span>
-        <span class="placeholder-tag">{existing_topics}</span>
-        <span class="placeholder-tag">{existing_people}</span>
-      </div>
-      <textarea id="classificationPrompt" rows="18"></textarea>
-      <button type="button" class="reset-btn" id="resetClassificationPrompt">Reset to default</button>
-    </div>
-  </div>
-
-  <div class="field">
-    <div class="collapsible-header" onclick="toggleCollapsible('grammarPrompt')">
-      <span class="collapsible-arrow" id="grammarPromptArrow">▶</span>
-      <label style="margin: 0; cursor: pointer;">Grammar Correction Prompt</label>
-    </div>
-    <div class="collapsible-content" id="grammarPromptContent">
-      <div class="help-text" style="margin-bottom: 8px;">
-        Customise how notes are grammar-checked. Available placeholders:
-        <span class="placeholder-tag">{text}</span>
-        <span class="placeholder-tag">{domain}</span>
-        <span class="placeholder-tag">{title}</span>
-        <span class="placeholder-tag">{type}</span>
-      </div>
-      <textarea id="grammarPrompt" rows="10"></textarea>
-      <button type="button" class="reset-btn" id="resetGrammarPrompt">Reset to default</button>
-    </div>
-  </div>
-
   <button id="saveBtn">Save</button>
 
-  <div class="shortcuts-section">
-    <h2 style="font-size: 18px; margin-bottom: 16px; color: #333;">Keyboard Shortcuts</h2>
+  <div class="shortcuts-section" id="shortcuts">
+    <h2 style="font-size: 18px; margin-bottom: 16px; color: #333;">Keyboard shortcuts</h2>
     <div class="shortcut-row">
       <span>Open save popup</span>
       <span class="shortcut-key">Ctrl+Shift+4</span>

@@ -36,3 +36,15 @@ desktop.ini
 # Extension development files
 *.crx
 *.pem
+
+# User data and captured files
+files/
+videos/
+installer/
+
+# Local settings (machine-specific)
+native-host/settings.json
+entities.json
+
+# Machine-specific knowledge base exports
+kb-*.md

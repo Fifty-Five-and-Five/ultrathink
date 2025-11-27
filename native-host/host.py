@@ -61,6 +61,48 @@ LINK_TYPES = ['link', 'chatgpt', 'claude', 'perplexity', 'notion']  # Types that
 TEXT_TYPES = ['snippet', 'note', 'para', 'idea']  # Types that just need text summarisation
 NO_SUMMARY_TYPES = ['video']  # Types that don't get AI summary
 
+# Settings file path (in same directory as this script)
+SETTINGS_FILE = Path(__file__).parent / 'settings.json'
+
+
+def load_settings():
+    """
+    Load settings from settings.json file.
+
+    Returns:
+        dict: Settings dictionary, or empty dict if file not found/invalid.
+
+    Settings include:
+        - openai_api_key: OpenAI API key for AI processing
+        - github_token, notion_token, fastmail_token: Integration tokens
+        - classification_prompt: Custom prompt for entry classification
+        - grammar_prompt: Custom prompt for grammar correction
+        - Other AI prompt customisations
+    """
+    try:
+        if SETTINGS_FILE.exists():
+            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def get_prompt(settings, key, default):
+    """
+    Get a prompt from settings, falling back to default if not set.
+
+    Args:
+        settings (dict): Settings dictionary from load_settings().
+        key (str): Settings key for the prompt (e.g., 'classification_prompt').
+        default (str): Default prompt to use if not in settings.
+
+    Returns:
+        str: The prompt to use (custom or default).
+    """
+    custom = settings.get(key, '').strip()
+    return custom if custom else default
+
 
 def validate_project_folder(project_folder):
     """
@@ -439,6 +481,48 @@ Original text: "{text}"
 Return JSON only:
 {{"corrected": "the corrected text here"}}"""
 
+DEFAULT_IMAGE_PROMPT = """Describe what is shown in this image in 2-3 sentences. Focus on the key elements and purpose."""
+
+DEFAULT_AUDIO_PROMPT = """Analyze this audio transcript and provide:
+
+1. **Summary**: A 2-3 sentence description of what is discussed/happening in this audio.
+
+2. **Speakers**: Based on the content, speaking styles, and any context provided, attempt to identify who is speaking. List speakers as "Speaker 1", "Speaker 2" etc, and if you can infer names or roles from context, include them (e.g., "Speaker 1 (likely John, the manager)").
+
+3. **Transcript**: Include the full transcript below.
+{notes}
+
+TRANSCRIPT:
+{transcript}"""
+
+DEFAULT_DOCUMENT_PROMPT = """Summarise this document in 2-3 sentences. What is the main topic and key points?
+
+{content}"""
+
+DEFAULT_LINK_PROMPT = """Browse this URL and provide a comprehensive summary of the page content.
+
+URL: {url}
+Page title: {title}
+User notes: {notes}
+
+Search the web for useful links, evidence, extra context or additional information related to this page. Cite all sources in your response.
+
+Provide:
+1. A 2-3 sentence summary of what the page is about
+2. Key information, facts, or takeaways from the content
+3. Any relevant context, related links, or supporting evidence you found
+4. List all sources at the end"""
+
+DEFAULT_TEXT_PROMPT = """Summarise this text in 1-2 sentences:
+
+{text}
+
+Return just the summary."""
+
+DEFAULT_RESEARCH_PROMPT = """Do background research on this topic and provide a 2-3 paragraph summary:
+
+{notes}"""
+
 
 def classify_entry(entry, api_key, existing_topics, existing_entities, ai_summary=None, custom_prompt=None):
     """
@@ -644,7 +728,7 @@ def fix_grammar_openai(text, entry, api_key, custom_prompt=None):
 # AI Summary Functions
 # =============================================================================
 
-def summarize_image(image_path, api_key):
+def summarize_image(image_path, api_key, custom_prompt=None):
     """Generate summary of an image using GPT-5 vision."""
     log_file = Path(__file__).parent / 'host.log'
 
@@ -658,13 +742,16 @@ def summarize_image(image_path, api_key):
         ext = Path(image_path).suffix.lower()
         mime_type = 'image/png' if ext == '.png' else 'image/jpeg'
 
+        # Use custom prompt or default
+        prompt = custom_prompt if custom_prompt else DEFAULT_IMAGE_PROMPT
+
         # Call GPT-5 vision API
         request_data = json.dumps({
             'model': 'gpt-5',
             'input': [{
                 'role': 'user',
                 'content': [
-                    {'type': 'input_text', 'text': 'Describe what is shown in this image in 2-3 sentences. Focus on the key elements and purpose.'},
+                    {'type': 'input_text', 'text': prompt},
                     {'type': 'input_image', 'image_url': f'data:{mime_type};base64,{base64_image}'}
                 ]
             }]
@@ -700,15 +787,19 @@ def summarize_image(image_path, api_key):
         return None
 
 
-def summarize_with_research(notes, api_key):
+def summarize_with_research(notes, api_key, custom_prompt=None):
     """Generate summary with web research using GPT-5 web search."""
     log_file = Path(__file__).parent / 'host.log'
 
     try:
+        # Use custom prompt or default
+        prompt_template = custom_prompt if custom_prompt else DEFAULT_RESEARCH_PROMPT
+        prompt = prompt_template.format(notes=notes)
+
         request_data = json.dumps({
             'model': 'gpt-5',
             'tools': [{'type': 'web_search'}],
-            'input': f'Do background research on this topic and provide a 2-3 paragraph summary:\n\n{notes}'
+            'input': prompt
         }).encode('utf-8')
 
         req = urllib.request.Request(
@@ -741,7 +832,7 @@ def summarize_with_research(notes, api_key):
         return None
 
 
-def summarize_audio(audio_path, api_key, notes=''):
+def summarize_audio(audio_path, api_key, notes='', custom_prompt=None):
     """Transcribe audio with Whisper, then summarize with speaker identification."""
     log_file = Path(__file__).parent / 'host.log'
 
@@ -786,22 +877,10 @@ def summarize_audio(audio_path, api_key, notes=''):
         with open(log_file, 'a', encoding='utf-8') as f:
             f.write(f"{datetime.now()}: Audio transcribed: {transcript[:100]}...\n")
 
-        # Build prompt with context from notes if available
-        notes_context = ''
-        if notes:
-            notes_context = f'\n\nUser notes about this audio: {notes}'
-
-        prompt = f'''Analyze this audio transcript and provide:
-
-1. **Summary**: A 2-3 sentence description of what is discussed/happening in this audio.
-
-2. **Speakers**: Based on the content, speaking styles, and any context provided, attempt to identify who is speaking. List speakers as "Speaker 1", "Speaker 2" etc, and if you can infer names or roles from context, include them (e.g., "Speaker 1 (likely John, the manager)").
-
-3. **Transcript**: Include the full transcript below.
-{notes_context}
-
-TRANSCRIPT:
-{transcript}'''
+        # Build prompt using template
+        prompt_template = custom_prompt if custom_prompt else DEFAULT_AUDIO_PROMPT
+        notes_context = f'\n\nUser notes about this audio: {notes}' if notes else ''
+        prompt = prompt_template.format(notes=notes_context, transcript=transcript)
 
         summary_request = json.dumps({
             'model': 'gpt-5-nano',
@@ -837,12 +916,15 @@ TRANSCRIPT:
         return None
 
 
-def summarize_document(file_path, entry_type, api_key):
+def summarize_document(file_path, entry_type, api_key, custom_prompt=None):
     """Summarize a document (PDF, markdown, Office files)."""
     log_file = Path(__file__).parent / 'host.log'
 
     try:
         content = None
+
+        # Use custom prompt or default
+        prompt_template = custom_prompt if custom_prompt else DEFAULT_DOCUMENT_PROMPT
 
         if entry_type == 'markdown':
             # Read markdown directly
@@ -854,12 +936,15 @@ def summarize_document(file_path, entry_type, api_key):
                 pdf_data = f.read()
             base64_pdf = base64.b64encode(pdf_data).decode('utf-8')
 
+            # For PDFs, use the template but strip the {content} placeholder
+            pdf_prompt = prompt_template.replace('{content}', '').strip()
+
             request_data = json.dumps({
                 'model': 'gpt-5',
                 'input': [{
                     'role': 'user',
                     'content': [
-                        {'type': 'input_text', 'text': 'Summarise this PDF document in 2-3 sentences. What is the main topic and key points?'},
+                        {'type': 'input_text', 'text': pdf_prompt},
                         {'type': 'input_file', 'file_data': f'data:application/pdf;base64,{base64_pdf}'}
                     ]
                 }]
@@ -900,10 +985,11 @@ def summarize_document(file_path, entry_type, api_key):
         if not content or len(content.strip()) < 10:
             return None
 
-        # Summarize the text content
+        # Summarize the text content using template
+        prompt = prompt_template.format(content=content[:4000])
         request_data = json.dumps({
             'model': 'gpt-5-nano',
-            'input': f'Summarise this document in 2-3 sentences:\n\n{content[:4000]}'
+            'input': prompt
         }).encode('utf-8')
 
         req = urllib.request.Request(
@@ -935,7 +1021,7 @@ def summarize_document(file_path, entry_type, api_key):
         return None
 
 
-def summarize_link(entry, api_key):
+def summarize_link(entry, api_key, custom_prompt=None, text_prompt=None):
     """
     Summarize a web link by browsing and analysing its content.
 
@@ -945,6 +1031,8 @@ def summarize_link(entry, api_key):
     Args:
         entry (dict): Entry containing 'url', 'title', and optional 'notes'.
         api_key (str): OpenAI API key.
+        custom_prompt (str|None): Custom prompt template for link summary.
+        text_prompt (str|None): Custom prompt for text fallback.
 
     Returns:
         str|None: Summary text with sources appended, or None on failure.
@@ -964,21 +1052,11 @@ def summarize_link(entry, api_key):
 
         if not url:
             # No URL to browse - fall back to basic summary
-            return summarize_text(entry, api_key)
+            return summarize_text(entry, api_key, text_prompt)
 
-        prompt = f"""Browse this URL and provide a comprehensive summary of the page content.
-
-URL: {url}
-Page title: {title}
-User notes: {notes if notes else 'None'}
-
-Search the web for useful links, evidence, extra context or additional information related to this page. Cite all sources in your response.
-
-Provide:
-1. A 2-3 sentence summary of what the page is about
-2. Key information, facts, or takeaways from the content
-3. Any relevant context, related links, or supporting evidence you found
-4. List all sources at the end"""
+        # Use custom prompt or default
+        prompt_template = custom_prompt if custom_prompt else DEFAULT_LINK_PROMPT
+        prompt = prompt_template.format(url=url, title=title, notes=notes if notes else 'None')
 
         request_data = json.dumps({
             'model': 'gpt-5',
@@ -1035,7 +1113,7 @@ Provide:
         return None
 
 
-def summarize_text(entry, api_key):
+def summarize_text(entry, api_key, custom_prompt=None):
     """Summarize text content (snippets, notes, ideas, paragraphs)."""
     log_file = Path(__file__).parent / 'host.log'
 
@@ -1048,11 +1126,9 @@ def summarize_text(entry, api_key):
         if not text or not text.strip():
             return None
 
-        prompt = f"""Summarise this text in 1-2 sentences:
-
-{text[:2000]}
-
-Return just the summary."""
+        # Use custom prompt or default
+        prompt_template = custom_prompt if custom_prompt else DEFAULT_TEXT_PROMPT
+        prompt = prompt_template.format(text=text[:2000])
 
         request_data = json.dumps({
             'model': 'gpt-5-nano',
@@ -1088,7 +1164,7 @@ Return just the summary."""
         return None
 
 
-def generate_ai_summary(entry_type, entry, file_path, api_key):
+def generate_ai_summary(entry_type, entry, file_path, api_key, prompts=None):
     """
     Route to the appropriate AI summary function based on entry type.
 
@@ -1104,11 +1180,13 @@ def generate_ai_summary(entry_type, entry, file_path, api_key):
         entry (dict): Entry data with notes, selectedText, url, etc.
         file_path (str|None): Path to associated file, if any.
         api_key (str): OpenAI API key.
+        prompts (dict|None): Custom prompts for each summary type.
 
     Returns:
         str|None: Generated summary text, or None if skipped/failed.
     """
     log_file = Path(__file__).parent / 'host.log'
+    prompts = prompts or {}
 
     try:
         with open(log_file, 'a', encoding='utf-8') as f:
@@ -1122,25 +1200,25 @@ def generate_ai_summary(entry_type, entry, file_path, api_key):
 
         if entry_type in IMAGE_TYPES:
             if file_path:
-                return summarize_image(file_path, api_key)
+                return summarize_image(file_path, api_key, prompts.get('image'))
         elif entry_type in RESEARCH_TYPES:
             notes = entry.get('notes', '')
             if notes:
-                return summarize_with_research(notes, api_key)
+                return summarize_with_research(notes, api_key, prompts.get('research'))
         elif entry_type in AUDIO_TYPES:
             if file_path:
                 notes = entry.get('notes', '')
-                return summarize_audio(file_path, api_key, notes)
+                return summarize_audio(file_path, api_key, notes, prompts.get('audio'))
         elif entry_type in DOCUMENT_TYPES:
             if file_path:
-                return summarize_document(file_path, entry_type, api_key)
+                return summarize_document(file_path, entry_type, api_key, prompts.get('document'))
         elif entry_type in TEXT_TYPES:
-            return summarize_text(entry, api_key)
+            return summarize_text(entry, api_key, prompts.get('text'))
         elif entry_type in LINK_TYPES:
-            return summarize_link(entry, api_key)
+            return summarize_link(entry, api_key, prompts.get('link'), prompts.get('text'))
         else:
             # Default: try text summary for unknown types
-            return summarize_text(entry, api_key)
+            return summarize_text(entry, api_key, prompts.get('text'))
 
         return None
 
@@ -1442,7 +1520,7 @@ def save_file(project_folder, file_data_url, filename, timestamp):
         return None
 
 
-def append_to_kb(project_folder, entry, api_key=None, classification_prompt=None, grammar_prompt=None):
+def append_to_kb(project_folder, entry, api_key=None):
     """Append entry to kb.md file (at the top) with optional AI classification."""
     try:
         # Validate project folder
@@ -1509,9 +1587,7 @@ def append_to_kb(project_folder, entry, api_key=None, classification_prompt=None
                 'timestamp': entry['captured'],
                 'entry': entry,
                 'api_key': api_key,
-                'file_path': str(folder_path / saved_file_path) if saved_file_path else None,
-                'classification_prompt': classification_prompt,
-                'grammar_prompt': grammar_prompt
+                'file_path': str(folder_path / saved_file_path) if saved_file_path else None
             } if api_key else None
         }
 
@@ -1681,7 +1757,7 @@ def update_entry_notes(project_folder, timestamp, new_notes):
         return False
 
 
-def background_process_entry(project_folder, timestamp, entry, api_key, file_path=None, classification_prompt=None, grammar_prompt=None):
+def background_process_entry(project_folder, timestamp, entry, api_key, file_path=None):
     """
     Background thread for AI processing pipeline.
 
@@ -1691,6 +1767,7 @@ def background_process_entry(project_folder, timestamp, entry, api_key, file_pat
     3. Classification (entity, topics, people extraction)
 
     Each step's results are written back to kb.md incrementally.
+    Prompts are loaded from settings.json file.
 
     Args:
         project_folder (str): Path to project folder containing kb.md.
@@ -1698,14 +1775,27 @@ def background_process_entry(project_folder, timestamp, entry, api_key, file_pat
         entry (dict): Original entry data.
         api_key (str): OpenAI API key.
         file_path (str|None): Path to associated file for summarisation.
-        classification_prompt (str|None): Custom classification prompt template.
-        grammar_prompt (str|None): Custom grammar correction prompt template.
     """
     log_file = Path(__file__).parent / 'host.log'
 
     try:
         with open(log_file, 'a', encoding='utf-8') as f:
             f.write(f"{datetime.now()}: Background thread started for {timestamp}\n")
+
+        # Load custom prompts from settings.json
+        settings = load_settings()
+        classification_prompt = get_prompt(settings, 'classification_prompt', DEFAULT_CLASSIFICATION_PROMPT)
+        grammar_prompt = get_prompt(settings, 'grammar_prompt', DEFAULT_GRAMMAR_PROMPT)
+
+        # Load all summary prompts
+        summary_prompts = {
+            'image': get_prompt(settings, 'image_prompt', DEFAULT_IMAGE_PROMPT),
+            'audio': get_prompt(settings, 'audio_prompt', DEFAULT_AUDIO_PROMPT),
+            'document': get_prompt(settings, 'document_prompt', DEFAULT_DOCUMENT_PROMPT),
+            'link': get_prompt(settings, 'link_prompt', DEFAULT_LINK_PROMPT),
+            'text': get_prompt(settings, 'text_prompt', DEFAULT_TEXT_PROMPT),
+            'research': get_prompt(settings, 'research_prompt', DEFAULT_RESEARCH_PROMPT),
+        }
 
         notes = entry.get('notes', '').strip()
 
@@ -1721,7 +1811,7 @@ def background_process_entry(project_folder, timestamp, entry, api_key, file_pat
         summary = None
         if api_key:
             entry_type = entry.get('type', '')
-            summary = generate_ai_summary(entry_type, entry, file_path, api_key)
+            summary = generate_ai_summary(entry_type, entry, file_path, api_key, summary_prompts)
             if summary:
                 add_summary_to_entry(project_folder, timestamp, summary)
 
@@ -2031,10 +2121,9 @@ def main():
                 project_folder = message.get('projectFolder')
                 entry = message.get('entry')
                 api_key = message.get('apiKey')  # API key for AI classification
-                classification_prompt = message.get('classificationPrompt') or None  # Empty string -> None
-                grammar_prompt = message.get('grammarPrompt') or None  # Empty string -> None
+                # Note: prompts are now read from settings.json by background_process_entry
 
-                result = append_to_kb(project_folder, entry, api_key, classification_prompt, grammar_prompt)
+                result = append_to_kb(project_folder, entry, api_key)
 
                 # Extract background task before sending (don't send internal field to extension)
                 background_task = result.pop('_background_task', None)
@@ -2043,6 +2132,7 @@ def main():
                 send_message(result)
 
                 # Now run background processing (grammar + classification + summary)
+                # Prompts are read from settings.json by background_process_entry
                 if background_task:
                     try:
                         background_process_entry(
@@ -2050,9 +2140,7 @@ def main():
                             background_task['timestamp'],
                             background_task['entry'],
                             background_task['api_key'],
-                            background_task.get('file_path'),
-                            background_task.get('classification_prompt'),
-                            background_task.get('grammar_prompt')
+                            background_task.get('file_path')
                         )
                     except Exception as bg_error:
                         with open(log_file, 'a', encoding='utf-8') as f:
