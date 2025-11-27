@@ -1,98 +1,29 @@
+/**
+ * @fileoverview UltraThink service worker (background script).
+ * Handles native messaging, screenshot capture, and coordinates saving entries.
+ * All AI processing (grammar, classification, summaries) is delegated to Python host.py.
+ * @module background
+ */
+
 // Import shared constants and logger
 importScripts('shared-constants.js', 'logger.js');
 
 // Initialize logger and create module-specific loggers
 initLogger();
-const grammarLog = createLogger('Grammar');
-const grammarUpdateLog = createLogger('GrammarUpdate');
 const screenshotLog = createLogger('Screenshot');
 const saveLog = createLogger('Save');
 const initLog = createLogger('Init');
+const metadataLog = createLogger('Metadata');
 
-// Store screenshot temporarily
+/**
+ * Temporary storage for screenshot data between capture and popup.
+ * Set when screenshot is taken, cleared when popup retrieves it.
+ * @type {Object|null}
+ */
 let pendingScreenshot = null;
 
-// Fix grammar using OpenAI Responses API
-async function fixGrammar(text, context = {}) {
-  if (!text || text.trim().length === 0) {
-    grammarLog.debug('Skipping empty text');
-    return text;
-  }
-
-  // Get API key from storage
-  const settings = await getSettings();
-  const apiKey = settings.openaiKey;
-
-  if (!apiKey) {
-    grammarLog.info('No API key configured, skipping');
-    return text;
-  }
-
-  grammarLog.debug('Starting fix for text:', text.substring(0, 100) + '...');
-  grammarLog.debug('Context:', context);
-
-  try {
-    // Build context information for better corrections
-    let contextInfo = '';
-    if (context.url) {
-      try {
-        const domain = new URL(context.url).hostname;
-        contextInfo += `\nContext: From ${domain}`;
-      } catch (e) {
-        // Invalid URL, skip
-      }
-    }
-    if (context.title) {
-      contextInfo += `\nPage: ${context.title.substring(0, 100)}`;
-    }
-    if (context.type) {
-      contextInfo += `\nType: ${context.type}`;
-    }
-    if (context.tabGroup?.groupName) {
-      contextInfo += `\nGroup: ${context.tabGroup.groupName}`;
-    }
-
-    const prompt = `Fix spelling and grammar errors in this note and make it more coherent. ${contextInfo ? `${contextInfo}\n` : ''}Preserve technical terms, jargon, and domain-specific language. Return only the corrected text with no explanations, quotes, or additional commentary:\n\n${text}`;
-
-    grammarLog.debug('Calling OpenAI API...');
-
-    const response = await fetch('https://api.openai.com/v1/responses', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: 'gpt-5-nano',
-        input: prompt
-      })
-    });
-
-    grammarLog.debug('API response status:', response.status);
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      grammarLog.error('API error:', response.status, errorText);
-      return text;
-    }
-
-    const data = await response.json();
-    grammarLog.debug('API response:', data);
-
-    // Extract text from raw API response (not using SDK, so no output_text helper)
-    const outputMessage = data.output?.find(item => item.type === 'message');
-    const textContent = outputMessage?.content?.find(c => c.type === 'output_text');
-    const fixed = textContent?.text?.trim() || text;
-
-    grammarLog.debug('Original:', text);
-    grammarLog.debug('Fixed:', fixed);
-
-    return fixed;
-  } catch (error) {
-    grammarLog.error('Exception:', error);
-    return text;
-  }
-}
+// NOTE: Grammar fix and classification now happen in Python background thread (host.py)
+// The JS background processing functions have been removed as they're no longer needed
 
 // Handle keyboard commands
 chrome.commands.onCommand.addListener((command) => {
@@ -166,10 +97,52 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       .then(result => sendResponse(result))
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
+  } else if (request.action === 'searchGitHub') {
+    // Search GitHub for related issues/commits
+    handleGitHubSearch(request.query, request.maxResults)
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
   }
 });
 
-// Get tab group information for a tab
+/**
+ * Searches GitHub for issues and commits related to a query.
+ * Uses settings for GitHub token and repos configuration.
+ *
+ * @async
+ * @function handleGitHubSearch
+ * @param {string} query - Search query string
+ * @param {number} [maxResults=10] - Maximum results per search type
+ * @returns {Promise<Object>} Search results with issues and commits
+ */
+async function handleGitHubSearch(query, maxResults = 10) {
+  const settings = await getSettings();
+
+  if (!settings.githubToken) {
+    return { success: false, error: 'GitHub token not configured. Add it in extension settings.' };
+  }
+
+  const message = {
+    action: 'search_github',
+    query: query,
+    githubToken: settings.githubToken,
+    githubRepos: settings.githubRepos || '',
+    maxResults: maxResults
+  };
+
+  return sendNativeMessage(message);
+}
+
+/**
+ * Retrieves tab group information for a given tab.
+ * Returns group name and colour if the tab belongs to a group.
+ *
+ * @async
+ * @function getTabGroupInfo
+ * @param {chrome.tabs.Tab} tab - The tab to get group info for
+ * @returns {Promise<Object|null>} Object with groupName and groupColor, or null
+ */
 async function getTabGroupInfo(tab) {
   if (tab.groupId && tab.groupId !== -1) {
     try {
@@ -186,7 +159,45 @@ async function getTabGroupInfo(tab) {
   return null;
 }
 
-// Handle single tab save
+/**
+ * Extracts page metadata by injecting page-metadata.js into the tab.
+ * Retrieves description, og:image, author, published date, and reading time.
+ *
+ * @async
+ * @function getPageMetadata
+ * @param {number} tabId - The ID of the tab to extract metadata from
+ * @returns {Promise<Object|null>} Metadata object or null on failure
+ */
+async function getPageMetadata(tabId) {
+  try {
+    metadataLog.debug('Extracting metadata for tab:', tabId);
+
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tabId },
+      files: ['page-metadata.js']
+    });
+
+    if (results && results[0] && results[0].result) {
+      metadataLog.debug('Metadata extracted:', results[0].result);
+      return results[0].result;
+    }
+
+    return null;
+  } catch (error) {
+    metadataLog.error('Error extracting metadata:', error);
+    return null;
+  }
+}
+
+/**
+ * Handles saving a single tab entry to the knowledge base.
+ * Extracts metadata, builds entry object, and sends to native host.
+ *
+ * @async
+ * @function handleSaveSingle
+ * @param {Object} request - Save request with tab, type, notes, selectedText
+ * @returns {Promise<Object>} Result object with success status
+ */
 async function handleSaveSingle(request) {
   try {
     const settings = await getSettings();
@@ -208,31 +219,38 @@ async function handleSaveSingle(request) {
       notes: request.notes || ''                 // New: user commentary
     };
 
+    // Extract page metadata for link-type entries (not screenshots, not special pages)
+    const linkTypes = ['link', 'claude', 'chatgpt', 'perplexity', 'pdf', 'markdown', 'notion', 'video', 'ms-word', 'ms-excel', 'ms-powerpoint', 'ms-onenote'];
+    if (linkTypes.includes(request.type) && tab.url && tab.url.startsWith('http')) {
+      try {
+        const metadata = await getPageMetadata(tab.id);
+        if (metadata) {
+          data.pageMetadata = metadata;
+        }
+      } catch (e) {
+        metadataLog.debug('Could not extract metadata:', e.message);
+      }
+    }
+
     // Add screenshot data if present
     if (request.screenshotData && request.type === 'screenshot') {
       data.screenshot = request.screenshotData.dataUrl;
     }
 
-    // Send to native host
+    // Send to native host with API key for background processing (grammar + classification)
+    // Python host spawns a thread to handle this, so response returns immediately
     const message = {
       action: 'append',
       projectFolder: projectFolder,
-      entry: data
+      entry: data,
+      apiKey: settings.openaiKey || ''
     };
 
     const response = await sendNativeMessage(message);
 
     if (response && response.success) {
-      // Fix grammar in background (don't await - let it happen async)
-      const originalNotes = request.notes || '';
-      if (originalNotes && originalNotes.trim().length > 0) {
-        fixGrammarAndUpdate(projectFolder, timestamp, originalNotes, {
-          url: tab.url,
-          title: tab.title,
-          type: request.type,
-          tabGroup: tabGroup
-        });
-      }
+      // Background processing (grammar + classification) happens in Python thread
+      // No JS background work needed - UI can return immediately
       return { success: true };
     } else {
       throw new Error(response?.error || 'Native host returned error');
@@ -243,48 +261,20 @@ async function handleSaveSingle(request) {
   }
 }
 
-// Fix grammar and update entry in background
-async function fixGrammarAndUpdate(projectFolder, timestamp, originalText, context = {}) {
-  try {
-    grammarUpdateLog.debug('Starting background fix...');
-    grammarUpdateLog.debug('Timestamp:', timestamp);
-
-    const fixedText = await fixGrammar(originalText, context);
-
-    // Only update if text actually changed
-    if (fixedText !== originalText) {
-      grammarUpdateLog.debug('Text was changed, updating entry...');
-
-      const updateMessage = {
-        action: 'update_last_entry',
-        projectFolder: projectFolder,
-        timestamp: timestamp,
-        newContent: fixedText
-      };
-
-      grammarUpdateLog.debug('Sending update to host...');
-      const response = await sendNativeMessage(updateMessage);
-
-      grammarUpdateLog.debug('Host response:', response);
-
-      if (response && response.success) {
-        grammarUpdateLog.info('Entry updated successfully');
-      } else {
-        grammarUpdateLog.error('Update failed:', response?.error);
-      }
-    } else {
-      grammarUpdateLog.debug('No changes needed');
-    }
-  } catch (error) {
-    grammarUpdateLog.error('Error:', error);
-  }
-}
-
-// Handle bulk save of all tabs
+/**
+ * Handles bulk saving of all tabs in the current window.
+ * Processes each tab and sends to native host for saving.
+ *
+ * @async
+ * @function handleSaveAllTabs
+ * @param {Object} request - Request with tabs array, type, and notes
+ * @returns {Promise<Object>} Result object with success status and count
+ */
 async function handleSaveAllTabs(request) {
   try {
     const settings = await getSettings();
     const projectFolder = settings.projectFolder || DEFAULT_SETTINGS.projectFolder;
+    const apiKey = settings.openaiKey || '';
 
     const timestamp = formatTimestamp();
     let savedCount = 0;
@@ -305,17 +295,19 @@ async function handleSaveAllTabs(request) {
         notes: request.notes || ''   // New: user commentary
       };
 
-      // Send to native host
+      // Send to native host with API key for background processing
       const message = {
         action: 'append',
         projectFolder: projectFolder,
-        entry: data
+        entry: data,
+        apiKey: apiKey
       };
 
       const response = await sendNativeMessage(message);
 
       if (response && response.success) {
         savedCount++;
+        // Background processing happens in Python thread
       } else {
         saveLog.error('Failed to save tab:', tab.title);
       }
@@ -328,7 +320,16 @@ async function handleSaveAllTabs(request) {
   }
 }
 
-// Handle file save from pinned dialog
+/**
+ * Handles saving a dropped/uploaded file to the knowledge base.
+ * Supports files and pasted text from the pinned dialog.
+ *
+ * @async
+ * @function handleFileSave
+ * @param {Object} request - Request with file data, type, and metadata
+ * @param {chrome.tabs.Tab} tab - The current tab for context
+ * @returns {Promise<Object>} Result object with success status
+ */
 async function handleFileSave(request, tab) {
   try {
     const settings = await getSettings();
@@ -361,32 +362,18 @@ async function handleFileSave(request, tab) {
       data.selectedText = request.content;  // Pasted text goes to selectedText
     }
 
-    // Send to native host
+    // Send to native host with API key for background processing
     const message = {
       action: 'append',
       projectFolder: projectFolder,
-      entry: data
+      entry: data,
+      apiKey: settings.openaiKey || ''
     };
 
     const response = await sendNativeMessage(message);
 
     if (response && response.success) {
-      // Fix grammar in background (don't await - let it happen async)
-      if (originalNotes && originalNotes.trim().length > 0) {
-        // Build context based on file type
-        const context = {
-          type: data.type
-        };
-
-        if (request.fileType === 'file') {
-          context.title = request.fileName;
-        } else if (request.fileType === 'text') {
-          context.url = tab.url;
-          context.title = tab.title;
-        }
-
-        fixGrammarAndUpdate(projectFolder, timestamp, originalNotes, context);
-      }
+      // Background processing happens in Python thread
       return { success: true };
     } else {
       throw new Error(response?.error || 'Native host returned error');
@@ -397,6 +384,14 @@ async function handleFileSave(request, tab) {
   }
 }
 
+/**
+ * Sends a message to the native messaging host (Python).
+ * Wraps Chrome's native messaging API in a Promise.
+ *
+ * @function sendNativeMessage
+ * @param {Object} message - Message object to send to native host
+ * @returns {Promise<Object>} Response from native host
+ */
 function sendNativeMessage(message) {
   return new Promise((resolve, reject) => {
     try {
@@ -413,7 +408,13 @@ function sendNativeMessage(message) {
   });
 }
 
-// Start screenshot selection process
+/**
+ * Initiates the screenshot selection process.
+ * Injects the selection overlay script into the active tab.
+ *
+ * @async
+ * @function startScreenshotSelection
+ */
 async function startScreenshotSelection() {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -428,7 +429,14 @@ async function startScreenshotSelection() {
   }
 }
 
-// Capture full screenshot
+/**
+ * Captures a full-page screenshot of the visible tab.
+ * Stores result in pendingScreenshot and opens the popup.
+ *
+ * @async
+ * @function captureScreenshot
+ * @param {chrome.tabs.Tab} [tab] - Tab to capture, defaults to active tab
+ */
 async function captureScreenshot(tab) {
   try {
     screenshotLog.debug('captureScreenshot called', tab);
@@ -457,7 +465,15 @@ async function captureScreenshot(tab) {
   }
 }
 
-// Capture screenshot of selected area
+/**
+ * Captures a screenshot of a user-selected area.
+ * Takes full screenshot then crops to the specified rectangle.
+ *
+ * @async
+ * @function captureAreaScreenshot
+ * @param {Object} rect - Selection rectangle {x, y, width, height}
+ * @param {chrome.tabs.Tab} tab - Tab where selection was made
+ */
 async function captureAreaScreenshot(rect, tab) {
   try {
     screenshotLog.debug('captureAreaScreenshot called', rect, tab);
@@ -487,7 +503,16 @@ async function captureAreaScreenshot(rect, tab) {
   }
 }
 
-// Crop image to specified rectangle (service worker compatible)
+/**
+ * Crops an image data URL to a specified rectangle.
+ * Uses OffscreenCanvas for service worker compatibility.
+ *
+ * @async
+ * @function cropImage
+ * @param {string} dataUrl - Base64 data URL of the full screenshot
+ * @param {Object} rect - Crop rectangle {x, y, width, height}
+ * @returns {Promise<string>} Cropped image as data URL
+ */
 async function cropImage(dataUrl, rect) {
   try {
     screenshotLog.debug('cropImage called with rect:', rect);

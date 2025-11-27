@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
     QLabel, QPushButton, QTextEdit, QFrame, QSizeGrip, QCheckBox
 )
 from PyQt6.QtCore import Qt, QTimer, QSize, QEvent, QRect, pyqtSignal
-from PyQt6.QtGui import QCursor, QGuiApplication, QPixmap, QPainter, QColor, QPen, QShortcut, QKeySequence, QTextCursor
+from PyQt6.QtGui import QCursor, QGuiApplication, QPixmap, QPainter, QColor, QPen, QShortcut, QKeySequence, QTextCursor, QIcon, QFont, QTextCharFormat
 
 # Audio recording
 try:
@@ -50,7 +50,26 @@ import shutil
 
 # Import save functions from host.py
 sys.path.insert(0, str(Path(__file__).parent))
-from host import append_to_kb, update_last_entry
+from host import append_to_kb, update_entry_notes, background_process_entry
+import json
+import threading
+
+
+def load_settings():
+    """Load settings from settings.json"""
+    settings_file = Path(__file__).parent / 'settings.json'
+    try:
+        if settings_file.exists():
+            with open(settings_file, 'r') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+# Load settings
+SETTINGS = load_settings()
+API_KEY = SETTINGS.get('openai_api_key', '')
 
 # Config
 PROJECT_FOLDER = r'C:\Users\ChrisWright\OneDrive - Fifty Five and Five\dev\ultrathink'
@@ -62,6 +81,10 @@ ICON_MICROPHONE = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"
 ICON_SPEAKER = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="{color}"><path d="M163.51,24.81a8,8,0,0,0-8.42.88L85.25,80H40A16,16,0,0,0,24,96v64a16,16,0,0,0,16,16H85.25l69.84,54.31A8,8,0,0,0,168,224V32A8,8,0,0,0,163.51,24.81ZM152,207.64,92.91,161.69A7.94,7.94,0,0,0,88,160H40V96H88a7.94,7.94,0,0,0,4.91-1.69L152,48.36ZM208,104v48a8,8,0,0,1-16,0V104a8,8,0,0,1,16,0Z"/></svg>'
 ICON_IMAGE = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="{color}"><path d="M216,40H40A16,16,0,0,0,24,56V200a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V56A16,16,0,0,0,216,40Zm0,16V158.75l-26.07-26.06a16,16,0,0,0-22.63,0l-20,20-44-44a16,16,0,0,0-22.62,0L40,149.37V56ZM40,172l52-52,80,80H40Zm176,28H194.63l-36-36,20-20L216,181.38V200ZM144,100a12,12,0,1,1,12,12A12,12,0,0,1,144,100Z"/></svg>'
 ICON_STOP = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="{color}"><path d="M200,40H56A16,16,0,0,0,40,56V200a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V56A16,16,0,0,0,200,40Zm0,160H56V56H200V200Z"/></svg>'
+# Waveform animation frames (3 frames for animation)
+ICON_WAVEFORM_1 = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="{color}"><rect x="52" y="96" width="24" height="64" rx="4"/><rect x="92" y="72" width="24" height="112" rx="4"/><rect x="132" y="56" width="24" height="144" rx="4"/><rect x="172" y="80" width="24" height="96" rx="4"/></svg>'
+ICON_WAVEFORM_2 = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="{color}"><rect x="52" y="72" width="24" height="112" rx="4"/><rect x="92" y="96" width="24" height="64" rx="4"/><rect x="132" y="80" width="24" height="96" rx="4"/><rect x="172" y="56" width="24" height="144" rx="4"/></svg>'
+ICON_WAVEFORM_3 = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="{color}"><rect x="52" y="80" width="24" height="96" rx="4"/><rect x="92" y="56" width="24" height="144" rx="4"/><rect x="132" y="96" width="24" height="64" rx="4"/><rect x="172" y="72" width="24" height="112" rx="4"/></svg>'
 ICON_NOTEPAD = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="{color}"><path d="M168,128a8,8,0,0,1-8,8H96a8,8,0,0,1,0-16h64A8,8,0,0,1,168,128Zm-8,24H96a8,8,0,0,0,0,16h64a8,8,0,0,0,0-16ZM216,40V200a32,32,0,0,1-32,32H72a32,32,0,0,1-32-32V40a8,8,0,0,1,8-8H72V24a8,8,0,0,1,16,0v8h32V24a8,8,0,0,1,16,0v8h32V24a8,8,0,0,1,16,0v8h24A8,8,0,0,1,216,40Zm-16,8H184v8a8,8,0,0,1-16,0V48H136v8a8,8,0,0,1-16,0V48H88v8a8,8,0,0,1-16,0V48H56V200a16,16,0,0,0,16,16H184a16,16,0,0,0,16-16Z"/></svg>'
 
 # Formatting toolbar icons (Phosphor Icons - regular weight)
@@ -74,6 +97,8 @@ ICON_QUOTE = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill
 ICON_LIST = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="{color}"><path d="M80,64a8,8,0,0,1,8-8H216a8,8,0,0,1,0,16H88A8,8,0,0,1,80,64Zm136,56H88a8,8,0,0,0,0,16H216a8,8,0,0,0,0-16Zm0,64H88a8,8,0,0,0,0,16H216a8,8,0,0,0,0-16ZM44,52A12,12,0,1,0,56,64,12,12,0,0,0,44,52Zm0,64a12,12,0,1,0,12,12A12,12,0,0,0,44,116Zm0,64a12,12,0,1,0,12,12A12,12,0,0,0,44,180Z"/></svg>'
 ICON_SAVE = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="{color}"><path d="M219.31,80,176,36.69A15.86,15.86,0,0,0,164.69,32H48A16,16,0,0,0,32,48V208a16,16,0,0,0,16,16H208a16,16,0,0,0,16-16V91.31A15.86,15.86,0,0,0,219.31,80ZM168,208H88V152h80Zm40,0H184V152a16,16,0,0,0-16-16H88a16,16,0,0,0-16,16v56H48V48H164.69L208,91.31ZM160,72a8,8,0,0,1-8,8H96a8,8,0,0,1,0-16h56A8,8,0,0,1,160,72Z"/></svg>'
 ICON_SPINNER = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="{color}"><path d="M136,32V64a8,8,0,0,1-16,0V32a8,8,0,0,1,16,0Zm37.25,58.75a8,8,0,0,0,5.66-2.35l22.63-22.62a8,8,0,0,0-11.32-11.32L167.6,77.09a8,8,0,0,0,5.65,13.66ZM224,120H192a8,8,0,0,0,0,16h32a8,8,0,0,0,0-16Zm-45.09,47.6a8,8,0,0,0-11.31,11.31l22.62,22.63a8,8,0,0,0,11.32-11.32ZM128,184a8,8,0,0,0-8,8v32a8,8,0,0,0,16,0V192A8,8,0,0,0,128,184ZM77.09,167.6,54.46,190.22a8,8,0,0,0,11.32,11.32L88.4,178.91A8,8,0,0,0,77.09,167.6ZM72,128a8,8,0,0,0-8-8H32a8,8,0,0,0,0,16H64A8,8,0,0,0,72,128ZM65.78,54.46A8,8,0,0,0,54.46,65.78L77.09,88.4A8,8,0,0,0,88.4,77.09Z"/></svg>'
+ICON_PLUS = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="{color}"><path d="M224,128a8,8,0,0,1-8,8H136v80a8,8,0,0,1-16,0V136H40a8,8,0,0,1,0-16h80V40a8,8,0,0,1,16,0v80h80A8,8,0,0,1,224,128Z"/></svg>'
+ICON_MINUS = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="{color}"><path d="M224,128a8,8,0,0,1-8,8H40a8,8,0,0,1,0-16H216A8,8,0,0,1,224,128Z"/></svg>'
 
 
 def create_icon_from_svg(svg_data, size=16, color="#666"):
@@ -133,6 +158,55 @@ def detect_file_type(filename):
         return 'image'
 
     return 'file'
+
+
+def html_to_markdown(html):
+    """Convert QTextEdit HTML to markdown format."""
+    import re
+
+    # Extract body content
+    body_match = re.search(r'<body[^>]*>(.*?)</body>', html, re.DOTALL | re.IGNORECASE)
+    if body_match:
+        html = body_match.group(1)
+
+    # Replace common HTML tags with markdown
+    # Bold: <span style="font-weight:700;"> or <b>
+    html = re.sub(r'<span[^>]*font-weight:\s*(?:700|bold)[^>]*>(.*?)</span>', r'**\1**', html, flags=re.DOTALL | re.IGNORECASE)
+    html = re.sub(r'<b>(.*?)</b>', r'**\1**', html, flags=re.DOTALL | re.IGNORECASE)
+    html = re.sub(r'<strong>(.*?)</strong>', r'**\1**', html, flags=re.DOTALL | re.IGNORECASE)
+
+    # Italic: <span style="font-style:italic;"> or <i>
+    html = re.sub(r'<span[^>]*font-style:\s*italic[^>]*>(.*?)</span>', r'*\1*', html, flags=re.DOTALL | re.IGNORECASE)
+    html = re.sub(r'<i>(.*?)</i>', r'*\1*', html, flags=re.DOTALL | re.IGNORECASE)
+    html = re.sub(r'<em>(.*?)</em>', r'*\1*', html, flags=re.DOTALL | re.IGNORECASE)
+
+    # Code: <span style="font-family:'Courier New'"> or <code>
+    html = re.sub(r'<span[^>]*font-family:[^>]*(?:Courier|monospace)[^>]*>(.*?)</span>', r'`\1`', html, flags=re.DOTALL | re.IGNORECASE)
+    html = re.sub(r'<code>(.*?)</code>', r'`\1`', html, flags=re.DOTALL | re.IGNORECASE)
+
+    # Links: <a href="...">text</a>
+    html = re.sub(r'<a[^>]*href=["\']([^"\']*)["\'][^>]*>(.*?)</a>', r'[\2](\1)', html, flags=re.DOTALL | re.IGNORECASE)
+
+    # Line breaks
+    html = re.sub(r'<br\s*/?>', '\n', html, flags=re.IGNORECASE)
+    html = re.sub(r'</p>\s*<p[^>]*>', '\n\n', html, flags=re.IGNORECASE)
+    html = re.sub(r'<p[^>]*>', '', html, flags=re.IGNORECASE)
+    html = re.sub(r'</p>', '', html, flags=re.IGNORECASE)
+
+    # Remove remaining HTML tags
+    html = re.sub(r'<[^>]+>', '', html)
+
+    # Decode HTML entities
+    html = html.replace('&nbsp;', ' ')
+    html = html.replace('&lt;', '<')
+    html = html.replace('&gt;', '>')
+    html = html.replace('&amp;', '&')
+    html = html.replace('&quot;', '"')
+
+    # Clean up extra whitespace
+    html = re.sub(r'\n\s*\n\s*\n', '\n\n', html)
+
+    return html.strip()
 
 
 class SelectionOverlay(QWidget):
@@ -263,6 +337,7 @@ class UltraThinkWidget(QWidget):
         # Audio recording state
         self.recording_type = None  # 'mic' or 'system'
         self.audio_stream = None
+        self.waveform_frame = 0  # For waveform animation
 
         # Expanded notes mode
         self.expanded_mode = False
@@ -277,17 +352,25 @@ class UltraThinkWidget(QWidget):
         # Track current long note timestamp (for updating same entry)
         self.current_note_timestamp = None
 
+        # Multi-tab support for expanded mode
+        # Each tab: {'text': str, 'timestamp': str or None}
+        self.note_tabs = [{'html': '', 'timestamp': None}]
+        self.current_tab_index = 0
+
         self.init_ui()
 
     def init_ui(self):
-        # Frameless, always on top
+        # Frameless, always on top, but show in taskbar (Window flag required)
         self.setWindowFlags(
+            Qt.WindowType.Window |
             Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.Tool
+            Qt.WindowType.WindowStaysOnTopHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setMouseTracking(True)
+
+        # Set window title for taskbar
+        self.setWindowTitle("UltraThink")
 
         self.setMinimumSize(200, 200)
         self.resize(280, 320)
@@ -396,17 +479,33 @@ class UltraThinkWidget(QWidget):
             """)
             return btn
 
+        # Add tab button (left of formatting buttons)
+        self.add_tab_btn = create_toolbar_btn(ICON_PLUS, "Add new note tab")
+        self.add_tab_btn.clicked.connect(self.add_note_tab)
+        toolbar_layout.addWidget(self.add_tab_btn)
+
+        # Close tab button (next to plus)
+        self.close_tab_btn = create_toolbar_btn(ICON_MINUS, "Close current tab")
+        self.close_tab_btn.clicked.connect(self.close_current_tab)
+        self.close_tab_btn.setEnabled(False)  # Disabled when only 1 tab
+        toolbar_layout.addWidget(self.close_tab_btn)
+
+        # Small separator after tab buttons
+        separator = QFrame()
+        separator.setFixedWidth(8)
+        toolbar_layout.addWidget(separator)
+
         # Create formatting buttons
         self.bold_btn = create_toolbar_btn(ICON_BOLD, "Bold (Ctrl+B)")
-        self.bold_btn.clicked.connect(lambda: self.apply_markdown_format("**"))
+        self.bold_btn.clicked.connect(self.apply_bold_format)
         toolbar_layout.addWidget(self.bold_btn)
 
         self.italic_btn = create_toolbar_btn(ICON_ITALIC, "Italic (Ctrl+I)")
-        self.italic_btn.clicked.connect(lambda: self.apply_markdown_format("*"))
+        self.italic_btn.clicked.connect(self.apply_italic_format)
         toolbar_layout.addWidget(self.italic_btn)
 
         self.code_btn = create_toolbar_btn(ICON_CODE, "Code (Ctrl+`)")
-        self.code_btn.clicked.connect(lambda: self.apply_markdown_format("`"))
+        self.code_btn.clicked.connect(self.apply_code_format)
         toolbar_layout.addWidget(self.code_btn)
 
         self.link_btn = create_toolbar_btn(ICON_LINK, "Link (Ctrl+K)")
@@ -414,15 +513,15 @@ class UltraThinkWidget(QWidget):
         toolbar_layout.addWidget(self.link_btn)
 
         self.header_btn = create_toolbar_btn(ICON_HEADER, "Header (Ctrl+H)")
-        self.header_btn.clicked.connect(lambda: self.apply_markdown_format("## ", "", True))
+        self.header_btn.clicked.connect(lambda: self.apply_line_prefix("## "))
         toolbar_layout.addWidget(self.header_btn)
 
         self.quote_btn = create_toolbar_btn(ICON_QUOTE, "Quote (Ctrl+Q)")
-        self.quote_btn.clicked.connect(lambda: self.apply_markdown_format("> ", "", True))
+        self.quote_btn.clicked.connect(lambda: self.apply_line_prefix("> "))
         toolbar_layout.addWidget(self.quote_btn)
 
         self.list_btn = create_toolbar_btn(ICON_LIST, "Bullet (Ctrl+L)")
-        self.list_btn.clicked.connect(lambda: self.apply_markdown_format("- ", "", True))
+        self.list_btn.clicked.connect(lambda: self.apply_line_prefix("- "))
         toolbar_layout.addWidget(self.list_btn)
 
         toolbar_layout.addStretch()
@@ -435,6 +534,22 @@ class UltraThinkWidget(QWidget):
         self.toolbar_widget.hide()  # Hidden by default
         layout.addWidget(self.toolbar_widget)
 
+        # Container for tab bar + notes (no spacing between them)
+        self.notes_container = QWidget()
+        notes_container_layout = QVBoxLayout(self.notes_container)
+        notes_container_layout.setContentsMargins(0, 0, 0, 0)
+        notes_container_layout.setSpacing(0)  # No gap between tab bar and notes
+
+        # Tab bar (only visible in expanded mode with multiple tabs)
+        self.tab_bar_widget = QWidget()
+        self.tab_bar_layout = QHBoxLayout(self.tab_bar_widget)
+        self.tab_bar_layout.setContentsMargins(0, 0, 0, 0)
+        self.tab_bar_layout.setSpacing(0)  # No spacing - tabs touch each other
+        self.tab_bar_layout.addStretch()  # Push tabs to the left
+        self.tab_buttons = []
+        self.tab_bar_widget.hide()  # Hidden by default
+        notes_container_layout.addWidget(self.tab_bar_widget)
+
         # Notes - bottom half (always visible by default)
         self.notes = QTextEdit()
         self.notes.setPlaceholderText("Add notes...")
@@ -442,21 +557,24 @@ class UltraThinkWidget(QWidget):
             QTextEdit {
                 border: 1px solid #ddd;
                 border-radius: 4px;
+                border-top-left-radius: 0px;
                 padding: 6px;
                 font-size: 13px;
             }
         """)
         self.notes.textChanged.connect(self.on_notes_changed)
-        layout.addWidget(self.notes, 1)  # stretch factor 1 - equal to drop zone
+        notes_container_layout.addWidget(self.notes, 1)
+
+        layout.addWidget(self.notes_container, 1)  # stretch factor 1 - equal to drop zone
 
         # Keyboard shortcuts for formatting (work when notes has focus)
-        QShortcut(QKeySequence("Ctrl+B"), self.notes, lambda: self.apply_markdown_format("**"))
-        QShortcut(QKeySequence("Ctrl+I"), self.notes, lambda: self.apply_markdown_format("*"))
-        QShortcut(QKeySequence("Ctrl+`"), self.notes, lambda: self.apply_markdown_format("`"))
+        QShortcut(QKeySequence("Ctrl+B"), self.notes, self.apply_bold_format)
+        QShortcut(QKeySequence("Ctrl+I"), self.notes, self.apply_italic_format)
+        QShortcut(QKeySequence("Ctrl+`"), self.notes, self.apply_code_format)
         QShortcut(QKeySequence("Ctrl+K"), self.notes, self.apply_link_format)
-        QShortcut(QKeySequence("Ctrl+H"), self.notes, lambda: self.apply_markdown_format("## ", "", True))
-        QShortcut(QKeySequence("Ctrl+Q"), self.notes, lambda: self.apply_markdown_format("> ", "", True))
-        QShortcut(QKeySequence("Ctrl+L"), self.notes, lambda: self.apply_markdown_format("- ", "", True))
+        QShortcut(QKeySequence("Ctrl+H"), self.notes, lambda: self.apply_line_prefix("## "))
+        QShortcut(QKeySequence("Ctrl+Q"), self.notes, lambda: self.apply_line_prefix("> "))
+        QShortcut(QKeySequence("Ctrl+L"), self.notes, lambda: self.apply_line_prefix("- "))
         QShortcut(QKeySequence("Ctrl+S"), self.notes, self.manual_save)
 
         # Recording/capture buttons
@@ -902,14 +1020,14 @@ class UltraThinkWidget(QWidget):
                 if item['type'] == 'text':
                     # Text note - use consistent format
                     entry = {
-                        'type': 'snippet',
+                        'type': 'note',
                         'source': 'widget',              # New: 'browser' or 'widget'
                         'captured': timestamp,
                         'title': 'Note',
                         'url': '',                       # No URL for widget
                         'tabGroup': None,
-                        'selectedText': user_notes,      # Text content goes to selectedText
-                        'notes': ''                      # No separate notes for pure text
+                        'selectedText': '',              # No selected text for widget notes
+                        'notes': user_notes              # User notes go here
                     }
                 elif item['type'] == 'screenshot':
                     # Screenshot - use 'screenshot' key (matches extension)
@@ -952,9 +1070,25 @@ class UltraThinkWidget(QWidget):
                         'fileData': f"data:application/octet-stream;base64,{item['data']}"
                     }
 
-                result = append_to_kb(PROJECT_FOLDER, entry)
+                result = append_to_kb(PROJECT_FOLDER, entry, API_KEY)
                 if not result.get('success'):
                     raise Exception(result.get('error', 'Unknown error'))
+
+                # Run background processing (grammar, classification, summary) in thread
+                if API_KEY:
+                    background_task = result.pop('_background_task', None)
+                    if background_task:
+                        thread = threading.Thread(
+                            target=background_process_entry,
+                            args=(
+                                background_task['project_folder'],
+                                background_task['timestamp'],
+                                background_task['entry'],
+                                background_task['api_key'],
+                                background_task.get('file_path')
+                            )
+                        )
+                        thread.start()
 
             # Success - just reset UI
             self.timer_label.hide()
@@ -1006,23 +1140,22 @@ class UltraThinkWidget(QWidget):
             )
             self.audio_stream.start()
 
-            # Update UI - show stop icon
-            self.mic_btn.setIcon(create_icon_from_svg(ICON_STOP, 16, "white"))
+            # Update UI - show animated waveform icon with #ff5200 background
+            self.waveform_frame = 0
+            self.mic_btn.setIcon(create_icon_from_svg(ICON_WAVEFORM_1, 16, "white"))
             self.mic_btn.setStyleSheet("""
                 QPushButton {
-                    border: 1px solid #dc3545;
+                    border: 1px solid #ff5200;
                     border-radius: 4px;
                     padding: 6px 10px;
-                    background: #dc3545;
+                    background: #ff5200;
                 }
             """)
             self.system_btn.setEnabled(False)
 
-            # Start recording timer
+            # Start waveform animation timer (200ms for smooth animation)
             self.recording_start_time = datetime.now()
-            self.recording_label.setText("● 0:00")
-            self.recording_label.show()
-            self.recording_timer.start(1000)
+            self.recording_timer.start(200)
 
         except Exception as e:
             self.status_label.setText(f"Mic error: {str(e)}")
@@ -1078,23 +1211,22 @@ class UltraThinkWidget(QWidget):
             )
             self.pyaudio_stream.start_stream()
 
-            # Update UI - show stop icon
-            self.system_btn.setIcon(create_icon_from_svg(ICON_STOP, 16, "white"))
+            # Update UI - show animated waveform icon with #ff5200 background
+            self.waveform_frame = 0
+            self.system_btn.setIcon(create_icon_from_svg(ICON_WAVEFORM_1, 16, "white"))
             self.system_btn.setStyleSheet("""
                 QPushButton {
-                    border: 1px solid #dc3545;
+                    border: 1px solid #ff5200;
                     border-radius: 4px;
                     padding: 6px 10px;
-                    background: #dc3545;
+                    background: #ff5200;
                 }
             """)
             self.mic_btn.setEnabled(False)
 
-            # Start recording timer
+            # Start waveform animation timer (200ms for smooth animation)
             self.recording_start_time = datetime.now()
-            self.recording_label.setText("● 0:00")
-            self.recording_label.show()
-            self.recording_timer.start(1000)
+            self.recording_timer.start(200)
 
         except Exception as e:
             self.status_label.setText(f"{str(e)}")
@@ -1113,11 +1245,17 @@ class UltraThinkWidget(QWidget):
         self.audio_data.append(indata.copy())
 
     def update_recording_time(self):
-        if self.recording_start_time:
-            elapsed = datetime.now() - self.recording_start_time
-            minutes = int(elapsed.total_seconds() // 60)
-            seconds = int(elapsed.total_seconds() % 60)
-            self.recording_label.setText(f"● {minutes}:{seconds:02d}")
+        """Animate waveform icon while recording."""
+        if self.recording_type:
+            # Cycle through waveform frames
+            self.waveform_frame = (self.waveform_frame + 1) % 3
+            waveforms = [ICON_WAVEFORM_1, ICON_WAVEFORM_2, ICON_WAVEFORM_3]
+            icon = create_icon_from_svg(waveforms[self.waveform_frame], 16, "white")
+
+            if self.recording_type == 'mic':
+                self.mic_btn.setIcon(icon)
+            elif self.recording_type == 'system':
+                self.system_btn.setIcon(icon)
 
     def stop_recording(self):
         if not self.audio_stream and not hasattr(self, 'pyaudio_stream'):
@@ -1189,10 +1327,10 @@ class UltraThinkWidget(QWidget):
             self.status_label.show()
 
         finally:
-            # Stop recording timer
+            # Stop waveform animation timer
             self.recording_timer.stop()
-            self.recording_label.hide()
             self.recording_start_time = None
+            self.waveform_frame = 0
 
             # Reset UI
             self.recording_type = None
@@ -1275,41 +1413,320 @@ class UltraThinkWidget(QWidget):
             """)
             self.expand_btn.setToolTip("Expand notes")
 
-            # If there's text, trigger auto-save flow
-            text = self.notes.toPlainText().strip()
-            if text:
-                self.pending_files = [{'type': 'text', 'name': 'Note', 'content': text}]
-                self.file_label.setText("📝 Note")
-                self.file_label.show()
-                self.start_timer()
-            else:
-                self.drop_zone.show()
+            # Save all tabs before closing, then clear
+            self._save_all_tabs()
 
-    # Markdown formatting methods
-    def apply_markdown_format(self, prefix, suffix=None, line_prefix=False):
-        """Wrap selected text with markdown syntax."""
-        cursor = self.notes.textCursor()
-        selected = cursor.selectedText()
+            # Clear notes and reset to default state (plain text only)
+            self.notes.clear()
+            # Reset text formatting to plain (no bold, italic, etc.)
+            self.notes.setCurrentCharFormat(QTextCharFormat())
+            self.pending_files = []
+            self.file_label.hide()
+            self.drop_zone.show()
 
-        if suffix is None:
-            suffix = prefix
+            # Reset tabs
+            self.note_tabs = [{'html': '', 'timestamp': None}]
+            self.current_tab_index = 0
+            self.tab_bar_widget.hide()
+            self._rebuild_tab_bar()
 
-        if line_prefix:
-            # For headers, quotes, bullets - prefix at line start
-            cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
-            cursor.insertText(prefix)
-        elif selected:
-            cursor.insertText(f"{prefix}{selected}{suffix}")
+    # Tab management methods
+    def add_note_tab(self):
+        """Add a new note tab."""
+        # Save current tab's HTML first (preserves formatting)
+        self.note_tabs[self.current_tab_index]['html'] = self.notes.toHtml()
+
+        # Create new tab
+        self.note_tabs.append({'html': '', 'timestamp': None})
+        new_index = len(self.note_tabs) - 1
+
+        # Switch to new tab
+        self._switch_to_tab(new_index)
+
+        # Show tab bar now that we have multiple tabs
+        if len(self.note_tabs) > 1:
+            self.tab_bar_widget.show()
+
+        self._rebuild_tab_bar()
+
+    def close_current_tab(self):
+        """Close the current tab (save first, then remove)."""
+        if len(self.note_tabs) <= 1:
+            return  # Can't close the last tab
+
+        # Save current tab before closing (if has content)
+        if self.notes.toPlainText().strip():
+            self._save_single_tab(self.current_tab_index)
+
+        # Remove the tab
+        del self.note_tabs[self.current_tab_index]
+
+        # Adjust current index if needed
+        if self.current_tab_index >= len(self.note_tabs):
+            self.current_tab_index = len(self.note_tabs) - 1
+
+        # Load the new current tab (using HTML to preserve formatting)
+        html = self.note_tabs[self.current_tab_index].get('html', '')
+        if html:
+            self.notes.setHtml(html)
         else:
-            cursor.insertText(f"{prefix}{suffix}")
-            cursor.movePosition(QTextCursor.MoveOperation.Left,
-                              QTextCursor.MoveMode.MoveAnchor, len(suffix))
+            self.notes.clear()
+        self.current_note_timestamp = self.note_tabs[self.current_tab_index]['timestamp']
 
+        # Rebuild tab bar
+        self._rebuild_tab_bar()
+
+        # Hide tab bar if only 1 tab left
+        if len(self.note_tabs) <= 1:
+            self.tab_bar_widget.hide()
+
+    def _save_single_tab(self, tab_index):
+        """Save a single tab's content (converts HTML to markdown)."""
+        tab = self.note_tabs[tab_index]
+
+        # Get HTML content - from tab storage or current notes widget
+        if tab_index == self.current_tab_index:
+            html = self.notes.toHtml()
+        else:
+            html = tab.get('html', '')
+
+        # Convert HTML to markdown for saving
+        text = html_to_markdown(html).strip()
+        if not text:
+            return
+
+        try:
+            if tab['timestamp']:
+                # Update existing entry
+                if not update_entry_notes(PROJECT_FOLDER, tab['timestamp'], text):
+                    raise Exception('Failed to update entry')
+            else:
+                # Create new entry
+                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                entry = {
+                    'type': 'long-note',
+                    'source': 'widget',
+                    'captured': timestamp,
+                    'title': 'Long Note',
+                    'url': '',
+                    'tabGroup': None,
+                    'selectedText': '',
+                    'notes': text
+                }
+
+                result = append_to_kb(PROJECT_FOLDER, entry, API_KEY)
+                if not result.get('success'):
+                    raise Exception(result.get('error', 'Unknown error'))
+
+                # Store timestamp
+                self.note_tabs[tab_index]['timestamp'] = timestamp
+
+                # Run background processing in thread
+                if API_KEY:
+                    background_task = result.pop('_background_task', None)
+                    if background_task:
+                        thread = threading.Thread(
+                            target=background_process_entry,
+                            args=(
+                                background_task['project_folder'],
+                                background_task['timestamp'],
+                                background_task['entry'],
+                                background_task['api_key'],
+                                background_task.get('file_path')
+                            )
+                        )
+                        thread.start()
+        except Exception as e:
+            self.status_label.setText(f"Error saving: {str(e)}")
+            self.status_label.setStyleSheet("font-size: 12px; padding: 6px; border-radius: 4px; background: #f8d7da; color: #721c24;")
+            self.status_label.show()
+
+    def _switch_to_tab(self, index):
+        """Switch to a different note tab."""
+        if index < 0 or index >= len(self.note_tabs):
+            return
+
+        # Save current tab's HTML content (preserves formatting)
+        self.note_tabs[self.current_tab_index]['html'] = self.notes.toHtml()
+
+        # Switch index
+        self.current_tab_index = index
+
+        # Load new tab's HTML content (restores formatting)
+        html = self.note_tabs[index].get('html', '')
+        if html:
+            self.notes.setHtml(html)
+        else:
+            self.notes.clear()
+
+        # Update current_note_timestamp for auto-save
+        self.current_note_timestamp = self.note_tabs[index]['timestamp']
+
+        # Rebuild tab bar to update active styling
+        self._rebuild_tab_bar()
+
+    def _rebuild_tab_bar(self):
+        """Rebuild the tab bar buttons."""
+        # Remove old buttons
+        for btn in self.tab_buttons:
+            self.tab_bar_layout.removeWidget(btn)
+            btn.deleteLater()
+        self.tab_buttons = []
+
+        # Update close button enabled state
+        self.close_tab_btn.setEnabled(len(self.note_tabs) > 1)
+
+        # Only show tab bar if more than 1 tab
+        if len(self.note_tabs) <= 1:
+            self.tab_bar_widget.hide()
+            return
+
+        # Remove stretch temporarily
+        stretch_item = self.tab_bar_layout.takeAt(self.tab_bar_layout.count() - 1)
+
+        # Create new buttons
+        tab_size = 24  # Square tabs
+        for i, tab in enumerate(self.note_tabs):
+            btn = QPushButton()
+            btn.setFixedSize(tab_size, tab_size)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+
+            # Active tab: solid grey fill (#ddd), grey border
+            # Inactive tabs: no background, grey border
+            if i == self.current_tab_index:
+                btn.setStyleSheet("""
+                    QPushButton {
+                        background: #ddd;
+                        border: 1px solid #ddd;
+                        border-bottom: none;
+                        border-radius: 4px;
+                        border-bottom-left-radius: 0px;
+                        border-bottom-right-radius: 0px;
+                    }
+                """)
+            else:
+                btn.setStyleSheet("""
+                    QPushButton {
+                        background: transparent;
+                        border: 1px solid #ddd;
+                        border-bottom: none;
+                        border-radius: 4px;
+                        border-bottom-left-radius: 0px;
+                        border-bottom-right-radius: 0px;
+                    }
+                    QPushButton:hover {
+                        background: rgba(255, 82, 0, 0.1);
+                    }
+                """)
+
+            # Connect click to switch
+            btn.clicked.connect(lambda checked, idx=i: self._switch_to_tab(idx))
+            self.tab_bar_layout.insertWidget(i, btn)
+            self.tab_buttons.append(btn)
+
+        # Re-add stretch at end
+        self.tab_bar_layout.addStretch()
+
+    def _save_all_tabs(self):
+        """Save all tabs that have content (converts HTML to markdown)."""
+        # Save current tab's HTML first
+        self.note_tabs[self.current_tab_index]['html'] = self.notes.toHtml()
+
+        for i, tab in enumerate(self.note_tabs):
+            # Convert HTML to markdown for saving
+            html = tab.get('html', '')
+            text = html_to_markdown(html).strip()
+            if not text:
+                continue
+
+            try:
+                if tab['timestamp']:
+                    # Update existing entry
+                    if not update_entry_notes(PROJECT_FOLDER, tab['timestamp'], text):
+                        raise Exception('Failed to update entry')
+                else:
+                    # Create new entry
+                    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    entry = {
+                        'type': 'long-note',
+                        'source': 'widget',
+                        'captured': timestamp,
+                        'title': 'Long Note',
+                        'url': '',
+                        'tabGroup': None,
+                        'selectedText': '',
+                        'notes': text
+                    }
+
+                    result = append_to_kb(PROJECT_FOLDER, entry, API_KEY)
+                    if not result.get('success'):
+                        raise Exception(result.get('error', 'Unknown error'))
+
+                    # Store timestamp
+                    self.note_tabs[i]['timestamp'] = timestamp
+
+                    # Run background processing in thread
+                    if API_KEY:
+                        background_task = result.pop('_background_task', None)
+                        if background_task:
+                            thread = threading.Thread(
+                                target=background_process_entry,
+                                args=(
+                                    background_task['project_folder'],
+                                    background_task['timestamp'],
+                                    background_task['entry'],
+                                    background_task['api_key'],
+                                    background_task.get('file_path')
+                                )
+                            )
+                            thread.start()
+            except Exception as e:
+                self.status_label.setText(f"Error saving tab {i+1}: {str(e)}")
+                self.status_label.setStyleSheet("font-size: 12px; padding: 6px; border-radius: 4px; background: #f8d7da; color: #721c24;")
+                self.status_label.show()
+
+    # Rich text formatting methods
+    def apply_bold_format(self):
+        """Toggle bold on selected text."""
+        cursor = self.notes.textCursor()
+        fmt = cursor.charFormat()
+        if fmt.fontWeight() == QFont.Weight.Bold:
+            fmt.setFontWeight(QFont.Weight.Normal)
+        else:
+            fmt.setFontWeight(QFont.Weight.Bold)
+        cursor.mergeCharFormat(fmt)
+        self.notes.setFocus()
+
+    def apply_italic_format(self):
+        """Toggle italic on selected text."""
+        cursor = self.notes.textCursor()
+        fmt = cursor.charFormat()
+        fmt.setFontItalic(not fmt.fontItalic())
+        cursor.mergeCharFormat(fmt)
+        self.notes.setFocus()
+
+    def apply_code_format(self):
+        """Toggle monospace font on selected text."""
+        cursor = self.notes.textCursor()
+        fmt = cursor.charFormat()
+        current_family = fmt.fontFamily()
+        if 'Courier' in current_family or 'monospace' in current_family.lower():
+            fmt.setFontFamily('')  # Reset to default
+        else:
+            fmt.setFontFamily('Courier New')
+        cursor.mergeCharFormat(fmt)
+        self.notes.setFocus()
+
+    def apply_line_prefix(self, prefix):
+        """Insert prefix at start of current line (for headers, quotes, bullets)."""
+        cursor = self.notes.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
+        cursor.insertText(prefix)
         self.notes.setTextCursor(cursor)
         self.notes.setFocus()
 
     def apply_link_format(self):
-        """Insert markdown link syntax."""
+        """Insert markdown link syntax (kept as markdown since HTML links are complex)."""
         cursor = self.notes.textCursor()
         selected = cursor.selectedText()
 
@@ -1329,7 +1746,9 @@ class UltraThinkWidget(QWidget):
 
     def manual_save(self):
         """Manual save triggered by button or Ctrl+S in expanded mode."""
-        text = self.notes.toPlainText().strip()
+        # Get HTML and convert to markdown for saving
+        html = self.notes.toHtml()
+        text = html_to_markdown(html).strip()
         if not text:
             return
 
@@ -1341,9 +1760,8 @@ class UltraThinkWidget(QWidget):
         try:
             if self.current_note_timestamp:
                 # Update existing entry
-                result = update_last_entry(PROJECT_FOLDER, self.current_note_timestamp, text)
-                if not result.get('success'):
-                    raise Exception(result.get('error', 'Unknown error'))
+                if not update_entry_notes(PROJECT_FOLDER, self.current_note_timestamp, text):
+                    raise Exception('Failed to update entry')
             else:
                 # Create new entry (first save)
                 timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -1354,19 +1772,40 @@ class UltraThinkWidget(QWidget):
                     'title': 'Long Note',
                     'url': '',
                     'tabGroup': None,
-                    'selectedText': text,
-                    'notes': ''
+                    'selectedText': '',
+                    'notes': text              # Markdown text saved here
                 }
 
-                result = append_to_kb(PROJECT_FOLDER, entry)
+                result = append_to_kb(PROJECT_FOLDER, entry, API_KEY)
                 if not result.get('success'):
                     raise Exception(result.get('error', 'Unknown error'))
 
+                # Run background processing (grammar, classification, summary) in thread
+                if API_KEY:
+                    background_task = result.pop('_background_task', None)
+                    if background_task:
+                        thread = threading.Thread(
+                            target=background_process_entry,
+                            args=(
+                                background_task['project_folder'],
+                                background_task['timestamp'],
+                                background_task['entry'],
+                                background_task['api_key'],
+                                background_task.get('file_path')
+                            )
+                        )
+                        thread.start()
+
                 # Store timestamp for subsequent updates
                 self.current_note_timestamp = timestamp
+                # Also update the tab's timestamp
+                self.note_tabs[self.current_tab_index]['timestamp'] = timestamp
 
-            # Show spinner for 2 seconds then restore save icon
-            QTimer.singleShot(2000, self._restore_save_button)
+            # Update tab's HTML (preserve formatting for display)
+            self.note_tabs[self.current_tab_index]['html'] = html
+
+            # Show spinner for 1 second then restore save icon
+            QTimer.singleShot(1000, self._restore_save_button)
 
         except Exception as e:
             self.status_label.setText(f"Error: {str(e)}")
@@ -1449,8 +1888,20 @@ class UltraThinkWidget(QWidget):
 
 
 def main():
+    # Set Windows AppUserModelID for correct taskbar icon
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('ultrathink.widget')
+    except Exception:
+        pass
+
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(True)
+
+    # Set application icon
+    icon_path = Path(__file__).parent.parent / 'ultrathink-extension' / 'icons' / 'icon128.png'
+    if icon_path.exists():
+        app.setWindowIcon(QIcon(str(icon_path)))
 
     widget = UltraThinkWidget()
     widget.show()

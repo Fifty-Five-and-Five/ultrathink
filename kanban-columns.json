@@ -1,0 +1,19 @@
+{
+  "columns": [
+    {
+      "id": "not-started",
+      "name": "Not started",
+      "color": "#6b7280"
+    },
+    {
+      "id": "in-progress",
+      "name": "In progress",
+      "color": "#3b82f6"
+    },
+    {
+      "id": "done",
+      "name": "Done",
+      "color": "#22c55e"
+    }
+  ]
+}

@@ -3,211 +3,969 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ultrathink Knowledge Base</title>
+    <title>Ultrathink</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="/ultrathink-extension/icons/icon32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/ultrathink-extension/icons/icon16.png">
+    <link rel="shortcut icon" href="/ultrathink-extension/icons/icon32.png">
 
     <!-- Tabulator CSS -->
-    <link href="https://unpkg.com/tabulator-tables@6.2.1/dist/css/tabulator_modern.min.css" rel="stylesheet">
+    <link href="https://unpkg.com/tabulator-tables@6.2.1/dist/css/tabulator_simple.min.css" rel="stylesheet">
 
     <style>
         * {
             box-sizing: border-box;
+            margin: 0;
+            padding: 0;
         }
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            margin: 0;
-            padding: 20px;
-            background: #f8f9fa;
+            background: #f5f5f5;
             color: #333;
+            height: 100vh;
+            overflow: hidden;
         }
 
-        header {
+        /* App Layout */
+        .app {
             display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-            flex-wrap: wrap;
-            gap: 16px;
+            flex-direction: column;
+            height: 100vh;
         }
 
-        h1 {
-            margin: 0;
-            font-size: 24px;
+        /* Top Header */
+        .top-header {
+            background: #fff;
+            border-bottom: 1px solid #e5e5e5;
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-shrink: 0;
+        }
+
+        .top-header .logo {
+            width: 24px;
+            height: 24px;
+        }
+
+        .top-header h1 {
+            font-size: 20px;
+            font-weight: 600;
             color: #333;
         }
 
+        .sidebar-toggle-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 6px;
+            border-radius: 4px;
+            color: #666;
+            margin-left: auto;
+        }
+
+        .sidebar-toggle-btn:hover {
+            background: #f5f5f5;
+        }
+
+        /* Main Container */
+        .main-container {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 200px;
+            background: #fff;
+            border-right: 1px solid #e5e5e5;
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+            transition: width 0.2s ease;
+        }
+
+        .sidebar.collapsed {
+            width: 56px;
+        }
+
+        .sidebar-nav {
+            padding: 12px 8px;
+            flex: 1;
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 12px;
+            border-radius: 6px;
+            color: #555;
+            text-decoration: none;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .nav-item:hover {
+            background: #f5f5f5;
+        }
+
+        .nav-item.active {
+            background: rgba(255, 82, 0, 0.1);
+            color: #ff5200;
+            font-weight: 500;
+        }
+
+        .nav-item svg {
+            width: 18px;
+            height: 18px;
+            flex-shrink: 0;
+        }
+
+        .nav-item span {
+            white-space: nowrap;
+            overflow: hidden;
+        }
+
+        .sidebar.collapsed .nav-item span {
+            display: none;
+        }
+
+        .nav-divider {
+            height: 1px;
+            background: #e5e5e5;
+            margin: 8px 12px;
+        }
+
+        /* Content Area */
+        .content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            background: #fafafa;
+        }
+
+        /* Toolbar */
         .toolbar {
+            padding: 16px 24px;
+            background: #fff;
+            border-bottom: 1px solid #e5e5e5;
             display: flex;
             gap: 12px;
             align-items: center;
             flex-wrap: wrap;
         }
 
-        #search {
-            padding: 8px 12px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: 14px;
-            width: 250px;
+        .search-box {
+            display: flex;
+            align-items: center;
+            background: #f5f5f5;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            padding: 0 12px;
+            flex: 1;
+            max-width: 320px;
         }
 
-        #search:focus {
+        .search-box svg {
+            width: 16px;
+            height: 16px;
+            color: #999;
+            flex-shrink: 0;
+        }
+
+        .search-box input {
+            border: none;
+            background: transparent;
+            padding: 8px 10px;
+            font-size: 14px;
+            width: 100%;
             outline: none;
-            border-color: #ff5200;
+        }
+
+        .filter-select {
+            padding: 8px 12px;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 13px;
+            background: #fff;
+            color: #333;
+            cursor: pointer;
+        }
+
+        .filter-select:focus {
+            outline: none;
+            border-color: #999;
+        }
+
+        .toolbar-right {
+            display: flex;
+            gap: 8px;
+            margin-left: auto;
+            align-items: center;
         }
 
         .btn {
-            padding: 8px 16px;
+            padding: 8px 14px;
             border: none;
-            border-radius: 4px;
-            font-size: 14px;
+            border-radius: 6px;
+            font-size: 13px;
             cursor: pointer;
-            transition: background 0.2s;
+            transition: background 0.15s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn-default {
+            background: #f5f5f5;
+            color: #333;
+            border: 1px solid #e0e0e0;
+        }
+
+        .btn-default:hover {
+            background: #eee;
         }
 
         .btn-primary {
             background: #ff5200;
-            color: white;
+            color: #fff;
+            border: 1px solid #ff5200;
         }
 
         .btn-primary:hover {
             background: #e64a00;
+            border-color: #e64a00;
         }
 
         .btn-danger {
-            background: #dc3545;
-            color: white;
+            background: #fee2e2;
+            color: #dc2626;
+            border: 1px solid #fecaca;
         }
 
-        .btn-danger:hover {
-            background: #c82333;
+        .btn-danger:hover:not(:disabled) {
+            background: #fecaca;
         }
 
         .btn-danger:disabled {
-            background: #ccc;
+            opacity: 0.5;
             cursor: not-allowed;
         }
 
-        #entryCount {
+        .entry-count {
             color: #666;
-            font-size: 14px;
+            font-size: 13px;
         }
 
-        /* Type badge styles */
+        /* Grid Container */
+        .grid-container {
+            flex: 1;
+            padding: 16px 24px 24px;
+            overflow: hidden;
+        }
+
+        #kb-table {
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            overflow: hidden;
+        }
+
+        /* Tabulator overrides */
+        .tabulator {
+            border: none !important;
+            font-size: 13px;
+        }
+
+        .tabulator .tabulator-header {
+            background: #fafafa !important;
+            border-bottom: 1px solid #e5e5e5 !important;
+        }
+
+        .tabulator .tabulator-header .tabulator-col {
+            background: transparent !important;
+            border-right: none !important;
+        }
+
+        .tabulator .tabulator-header .tabulator-col .tabulator-col-content {
+            padding: 12px 16px !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: flex-start !important;
+        }
+
+        .tabulator .tabulator-header .tabulator-col .tabulator-col-title-holder {
+            display: inline-flex !important;
+            align-items: center !important;
+            flex-direction: row !important;
+            flex: 0 0 auto !important;
+        }
+
+        .tabulator .tabulator-header .tabulator-col .tabulator-col-title {
+            color: #666 !important;
+            font-weight: 500 !important;
+            font-size: 12px !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.5px !important;
+        }
+
+        /* Sort arrow inline with title - left aligned */
+        .tabulator .tabulator-header .tabulator-col .tabulator-col-sorter {
+            display: inline-flex !important;
+            align-items: center !important;
+            margin-left: 2px !important;
+            position: static !important;
+            right: auto !important;
+            top: auto !important;
+        }
+
+        .tabulator .tabulator-header .tabulator-col .tabulator-col-sorter .tabulator-arrow {
+            border-width: 4px !important;
+            border-bottom-color: #ccc !important;
+            border-top-color: #ccc !important;
+        }
+
+        .tabulator .tabulator-col[aria-sort="ascending"] .tabulator-col-sorter .tabulator-arrow {
+            border-bottom-color: #666 !important;
+        }
+
+        .tabulator .tabulator-col[aria-sort="descending"] .tabulator-col-sorter .tabulator-arrow {
+            border-top-color: #666 !important;
+        }
+
+        .tabulator .tabulator-tableholder {
+            overflow-x: hidden !important;
+        }
+
+        .tabulator .tabulator-row {
+            border-bottom: 1px solid #f0f0f0 !important;
+            border-left: none !important;
+        }
+
+        .tabulator .tabulator-row .tabulator-cell {
+            border-right: none !important;
+            padding: 12px 16px !important;
+        }
+
+        .tabulator .tabulator-row:hover {
+            background: #fafafa !important;
+        }
+
+        .tabulator .tabulator-row.tabulator-selected {
+            background: #f5f5f5 !important;
+        }
+
+        .tabulator .tabulator-row .tabulator-responsive-collapse {
+            border: none !important;
+        }
+
+        /* Remove any colored indicator bars */
+        .tabulator .tabulator-row::before,
+        .tabulator .tabulator-row::after {
+            display: none !important;
+        }
+
+        /* Row selection checkbox column */
+        .tabulator .tabulator-row .tabulator-cell:first-child {
+            border-left: none !important;
+        }
+
+        /* Type badge */
         .type-badge {
             display: inline-block;
-            padding: 2px 8px;
-            border-radius: 12px;
+            padding: 3px 8px;
+            border-radius: 4px;
             font-size: 11px;
             font-weight: 500;
             color: white;
-            text-transform: lowercase;
         }
 
-        /* Title link styles */
+        /* Source text */
+        .source-text {
+            color: #888;
+            font-size: 13px;
+        }
+
+        /* Title link - same color as text */
         .title-link {
-            color: #ff5200;
+            color: #333;
             text-decoration: none;
         }
 
         .title-link:hover {
             text-decoration: underline;
-            color: #e64a00;
-        }
-
-        /* Delete button in row */
-        .delete-btn {
-            background: none;
-            border: none;
-            color: #dc3545;
-            cursor: pointer;
-            font-size: 18px;
-            padding: 4px 8px;
-            border-radius: 4px;
-        }
-
-        .delete-btn:hover {
-            background: #fee;
-        }
-
-        /* Container */
-        #kb-table {
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-        }
-
-        /* Screenshot preview */
-        .screenshot-preview {
-            max-width: 100px;
-            max-height: 60px;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-
-        .screenshot-preview:hover {
-            opacity: 0.8;
+            color: #111;
         }
 
         /* Content cell */
         .content-cell {
-            max-width: 300px;
+            color: #666;
+        }
+
+        /* Entity badge */
+        .entity-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+            color: #374151;
+        }
+
+        /* Topic tags */
+        .topic-tag {
+            display: inline-block;
+            padding: 2px 8px;
+            margin: 1px 2px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 500;
+            background: #e0f2fe;
+            color: #0369a1;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .topic-tag:hover {
+            background: #bae6fd;
+        }
+
+        /* Person tags */
+        .person-tag {
+            display: inline-block;
+            padding: 2px 8px;
+            margin: 1px 2px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 500;
+            background: #fef3c7;
+            color: #92400e;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .person-tag:hover {
+            background: #fde68a;
+        }
+
+        /* Modal tags container */
+        .modal-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+        }
+
+        .modal-tags .topic-tag,
+        .modal-tags .person-tag {
+            cursor: default;
+        }
+
+        .modal-tags .topic-tag:hover,
+        .modal-tags .person-tag:hover {
+            background: inherit;
+        }
+
+        .modal-tags .topic-tag {
+            background: #e0f2fe;
+        }
+
+        .modal-tags .person-tag {
+            background: #fef3c7;
+        }
+
+        /* Delete button */
+        .delete-btn {
+            background: none;
+            border: none;
+            color: #ccc;
+            cursor: pointer;
+            font-size: 18px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            line-height: 1;
+        }
+
+        .delete-btn:hover {
+            color: #dc2626;
+            background: #fee2e2;
+        }
+
+        /* Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.4);
+            z-index: 2000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal {
+            background: white;
+            border-radius: 12px;
+            max-width: 640px;
+            width: 90%;
+            max-height: 85vh;
+            overflow: hidden;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+        }
+
+        .modal-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 16px;
+        }
+
+        .modal-title {
+            font-size: 18px;
+            font-weight: 500;
+            color: #333;
+            word-break: break-word;
+        }
+
+        .modal-title a {
+            color: #333;
+            text-decoration: none;
+        }
+
+        .modal-title a:hover {
+            text-decoration: underline;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            color: #999;
+            cursor: pointer;
+            padding: 0;
+            line-height: 1;
+        }
+
+        .modal-close:hover {
+            color: #333;
+        }
+
+        .modal-body {
+            padding: 24px;
+            overflow-y: auto;
+            max-height: calc(85vh - 80px);
+        }
+
+        .modal-meta {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .modal-meta-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            color: #666;
+        }
+
+        .modal-meta-label {
+            color: #999;
+        }
+
+        .modal-section {
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+        }
+
+        /* File/media sections - no border, just spacing */
+        .modal-file-section {
+            border-top: none;
+            padding-top: 16px;
+            margin-top: 16px;
+            margin-bottom: 20px;
+        }
+
+        .modal-section h4 {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #999;
+            margin: 0 0 12px 0;
+            font-weight: 500;
+        }
+
+        .modal-content-text {
+            font-size: 14px;
+            color: #333;
+            line-height: 1.6;
+            white-space: pre-wrap;
+        }
+
+        .modal-screenshot {
+            max-width: 100%;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        .modal-file-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 14px;
+            background: #f5f5f5;
+            border-radius: 6px;
+            color: #333;
+            text-decoration: none;
+            font-size: 13px;
+        }
+
+        .modal-file-link:hover {
+            background: #eee;
+        }
+
+        .modal-url {
+            color: #666;
+            word-break: break-all;
+            font-size: 13px;
+        }
+
+        .modal-url:hover {
+            color: #333;
+        }
+
+        /* Link row - inline label and URL */
+        .modal-link-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px 0;
+        }
+
+        .modal-link-label {
+            font-size: 11px;
+            font-weight: 500;
+            color: #999;
+            letter-spacing: 0.5px;
+            flex-shrink: 0;
+        }
+
+        .modal-link-row .modal-url {
+            flex: 1;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
         }
 
-        /* Group badge */
-        .group-badge {
-            display: inline-block;
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-size: 11px;
-            background: #e9ecef;
-            color: #495057;
+        /* Page metadata in modal */
+        .modal-page-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
         }
 
-        /* Tabulator customizations */
-        .tabulator {
+        .modal-og-image {
+            margin-bottom: 12px;
+        }
+
+        .modal-og-image img {
+            max-width: 100%;
+            max-height: 200px;
+            object-fit: cover;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        .modal-meta-row {
+            font-size: 13px;
+            color: #555;
+            line-height: 1.5;
+        }
+
+        .modal-meta-row .modal-meta-label {
+            color: #888;
+            margin-right: 4px;
+        }
+
+        /* Audio/Video players in modal */
+        .modal-audio {
+            width: 100%;
+            margin-bottom: 8px;
+        }
+
+        .modal-video {
+            width: 100%;
+            max-height: 400px;
+            border-radius: 6px;
+            margin-bottom: 8px;
+        }
+
+        /* My Notes section */
+        /* Snippet section (yellow box - selected text from page) */
+        .modal-snippet-section {
+            background: #fffbeb;
+            margin: -24px -24px 0 -24px;
+            padding: 20px 24px;
+            border-bottom: 1px solid #fde68a;
+            position: relative;
+        }
+
+        .modal-snippet-section h4 {
+            color: #92400e;
+        }
+
+        .modal-snippet-text {
+            font-size: 14px;
+            color: #78350f;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+        }
+
+        /* MY NOTES section (yellow box) */
+        .modal-notes-section {
+            background: #fffbeb;
+            margin: 0 -24px;
+            padding: 20px 24px;
+            border-bottom: 1px solid #fde68a;
+            position: relative;
+        }
+
+        /* When MY NOTES is first (no snippet), pull it up flush */
+        .modal-notes-section:first-child {
+            margin-top: -24px;
+        }
+
+        .modal-notes-section h4 {
+            color: #92400e;
+        }
+
+        .modal-notes-text {
+            font-size: 14px;
+            color: #78350f;
+            line-height: 1.6;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+        }
+
+        /* Markdown rendering styles in notes */
+        .modal-notes-text strong {
+            font-weight: 600;
+        }
+
+        .modal-notes-text em {
+            font-style: italic;
+        }
+
+        .modal-notes-text code {
+            font-family: 'Courier New', monospace;
+            background: rgba(146, 64, 14, 0.1);
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-size: 13px;
+        }
+
+        .modal-notes-text a {
+            color: #b45309;
+            text-decoration: underline;
+        }
+
+        .modal-notes-text a:hover {
+            color: #92400e;
+        }
+
+        .modal-notes-text h3, .modal-notes-text h4, .modal-notes-text h5 {
+            margin: 12px 0 8px 0;
+            color: #92400e;
+        }
+
+        .modal-notes-text h3 { font-size: 16px; }
+        .modal-notes-text h4 { font-size: 15px; }
+        .modal-notes-text h5 { font-size: 14px; }
+
+        .modal-notes-text blockquote {
+            border-left: 3px solid #fbbf24;
+            margin: 8px 0;
+            padding-left: 12px;
+            color: #92400e;
+            font-style: italic;
+        }
+
+        .modal-notes-text ul {
+            margin: 8px 0;
+            padding-left: 20px;
+        }
+
+        .modal-notes-text li {
+            margin: 4px 0;
+        }
+
+        /* Copy button */
+        .modal-copy-btn {
+            position: absolute;
+            top: 16px;
+            right: 20px;
+            background: none;
             border: none;
+            cursor: pointer;
+            padding: 4px;
+            color: #a3a3a3;
+            border-radius: 4px;
+            opacity: 0.7;
+            transition: opacity 0.15s, color 0.15s;
         }
 
-        .tabulator .tabulator-header {
-            background: #ff5200;
-            border-bottom: 2px solid #e64a00;
+        .modal-copy-btn:hover {
+            opacity: 1;
+            color: #666;
         }
 
-        .tabulator .tabulator-header .tabulator-col {
-            background: transparent;
-            color: white;
+        .modal-copy-btn.copied {
+            color: #ff5200;
         }
 
-        .tabulator .tabulator-header .tabulator-col.tabulator-sortable:hover {
-            background: rgba(255, 255, 255, 0.1);
+
+        /* AI Summary section (light yellow - same style as MY NOTES) */
+        .modal-ai-section {
+            background: #fef9e7;
+            margin: 0 -24px;
+            padding: 20px 24px;
+            border-top: 1px solid #fde68a;
+            position: relative;
         }
 
-        .tabulator .tabulator-header .tabulator-col .tabulator-col-content .tabulator-arrow {
-            border-bottom-color: white;
-            border-top-color: white;
+        /* When AI Summary is first (no MY NOTES), make it flush with title */
+        .modal-ai-section:first-child {
+            margin-top: -24px;
+            border-top: none;
         }
 
-        .tabulator .tabulator-row.tabulator-selected {
-            background: #fff0e6 !important;
+        .modal-ai-section h4 {
+            color: #92400e;
+            font-size: 11px;
+            font-weight: 500;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            margin-bottom: 12px;
         }
 
-        .tabulator .tabulator-row.tabulator-selected:hover {
-            background: #ffe4d4 !important;
+        .modal-ai-text {
+            font-size: 14px;
+            color: #78350f;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
         }
 
-        .tabulator .tabulator-row:hover {
-            background: #fff8f5;
+        /* Page info section */
+        .modal-page-info {
+            padding: 8px 0;
+            border-top: none;
         }
 
-        /* Header filter inputs */
-        .tabulator .tabulator-header .tabulator-col .tabulator-header-filter input,
-        .tabulator .tabulator-header .tabulator-col .tabulator-header-filter select {
-            background: rgba(255, 255, 255, 0.9);
-            border: 1px solid rgba(255, 255, 255, 0.5);
+        .modal-page-info.modal-section {
+            border-top: none;
+            margin-top: 8px;
+        }
+
+        .modal-page-info h4 {
+            font-size: 11px;
+            font-weight: 500;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            color: #999;
+            margin-bottom: 12px;
+        }
+
+        .modal-page-desc {
+            font-size: 13px;
+            color: #666;
+            line-height: 1.5;
+            margin-bottom: 8px;
+        }
+
+        .modal-page-meta {
+            font-size: 12px;
+            color: #999;
+        }
+
+        /* Status bar at bottom */
+        .modal-status-bar {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            padding: 16px 16px 20px 16px;
+            margin: 0 -24px -24px -24px;
+            background: #f8f8f8;
+        }
+
+        /* Add top margin when page-info precedes status bar */
+        .modal-page-info + .modal-status-bar {
+            margin-top: 16px;
+        }
+
+        .modal-status-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            padding-bottom: 16px;
+            margin-bottom: 6px;
+            border-bottom: 1px solid #e5e5e5;
+        }
+
+        .modal-status-meta {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .modal-status-item {
+            font-size: 12px;
+            color: #888;
+        }
+
+        /* PDF viewer */
+        .modal-pdf-viewer {
+            width: 100%;
+            height: 500px;
+            border: 1px solid #e5e5e5;
+            border-radius: 6px;
+            margin-bottom: 8px;
+        }
+
+        /* Code preview */
+        .modal-code-preview {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 16px;
+            border-radius: 6px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 12px;
+            line-height: 1.5;
+            max-height: 400px;
+            overflow-y: auto;
+            overflow-x: hidden;
+            margin-bottom: 8px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            word-break: break-all;
         }
 
         /* Status message */
@@ -216,46 +974,1095 @@
             bottom: 20px;
             right: 20px;
             padding: 12px 20px;
-            border-radius: 4px;
-            font-size: 14px;
-            z-index: 1000;
+            border-radius: 6px;
+            font-size: 13px;
+            z-index: 3000;
             display: none;
         }
 
         .status-message.success {
             display: block;
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
+            background: #dcfce7;
+            color: #166534;
         }
 
         .status-message.error {
             display: block;
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
+            background: #fee2e2;
+            color: #dc2626;
+        }
+
+        /* Management page styles */
+        .management-page {
+            display: none;
+            padding: 24px;
+            height: 100%;
+            overflow-y: auto;
+        }
+
+        .management-page.active {
+            display: block;
+        }
+
+        .management-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .management-header h2 {
+            font-size: 20px;
+            font-weight: 600;
+            color: #333;
+            margin: 0;
+        }
+
+        .management-list {
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            overflow: hidden;
+        }
+
+        .management-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 16px;
+            border-bottom: 1px solid #f0f0f0;
+            gap: 12px;
+        }
+
+        .management-item:last-child {
+            border-bottom: none;
+        }
+
+        .management-item-name {
+            flex: 1;
+            font-size: 14px;
+            color: #333;
+        }
+
+        .management-item-count {
+            font-size: 12px;
+            color: #888;
+            background: #f5f5f5;
+            padding: 2px 8px;
+            border-radius: 10px;
+        }
+
+        .management-item input {
+            flex: 1;
+            padding: 6px 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .management-item .btn-icon {
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 6px;
+            color: #888;
+            border-radius: 4px;
+        }
+
+        .management-item .btn-icon:hover {
+            background: #f5f5f5;
+            color: #333;
+        }
+
+        .management-item .btn-icon.delete:hover {
+            background: #fee2e2;
+            color: #dc2626;
+        }
+
+        .add-item-row {
+            display: flex;
+            gap: 8px;
+            padding: 12px 16px;
+            background: #fafafa;
+            border-top: 1px solid #e5e5e5;
+        }
+
+        .add-item-row input {
+            flex: 1;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #888;
+        }
+
+        /* Visualisation Page */
+        .vis-toolbar {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+            padding: 16px 24px;
+            background: #fff;
+            border-bottom: 1px solid #e5e5e5;
+            margin: -24px -24px 0 -24px;
+        }
+
+        .vis-toolbar .search-box {
+            flex: 0 1 200px;
+        }
+
+        .time-filter {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #666;
+        }
+
+        .time-filter input[type="date"] {
+            padding: 6px 10px;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+
+        .vis-graph-wrapper {
+            position: relative;
+            flex: 1;
+            margin-top: 16px;
+        }
+
+        .vis-container {
+            width: 100%;
+            height: calc(100vh - 220px);
+            min-height: 500px;
+            background: #fafafa;
+            border-radius: 8px;
+            border: 1px solid #e5e5e5;
+        }
+
+        .vis-stats {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            background: rgba(255, 255, 255, 0.95);
+            border: 1px solid #e5e5e5;
+            border-radius: 8px;
+            padding: 12px 16px;
+            font-size: 13px;
+            color: #333;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            z-index: 10;
+        }
+
+        .vis-stats-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 24px;
+            margin-bottom: 4px;
+        }
+
+        .vis-stats-row:last-child {
+            margin-bottom: 0;
+        }
+
+        .vis-stats-label {
+            color: #888;
+        }
+
+        .vis-stats-value {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .vis-legend {
+            position: absolute;
+            bottom: 12px;
+            right: 12px;
+            background: rgba(255, 255, 255, 0.95);
+            border: 1px solid #e5e5e5;
+            border-radius: 8px;
+            padding: 12px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            z-index: 10;
+        }
+
+        .vis-legend-title {
+            font-size: 11px;
+            font-weight: 600;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+
+        .vis-legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: #555;
+        }
+
+        .vis-legend-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        #visualisePage.active {
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Kanban Board Styles */
+        .kanban-container {
+            display: none;
+            flex: 1;
+            overflow: hidden;
+            padding: 16px 24px 24px;
+        }
+
+        .kanban-container.active {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .kanban-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+
+        .kanban-header h2 {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+            margin: 0;
+        }
+
+        .kanban-board {
+            display: flex;
+            gap: 16px;
+            flex: 1;
+            overflow-x: auto;
+            padding-bottom: 8px;
+        }
+
+        .kanban-column {
+            min-width: 280px;
+            max-width: 320px;
+            flex: 1;
+            background: #f0f0f0;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            max-height: calc(100vh - 200px);
+        }
+
+        .kanban-column-header {
+            padding: 0;
+            font-weight: 600;
+            font-size: 14px;
+            color: #333;
+            border-bottom: 2px solid;
+            display: flex;
+            flex-direction: column;
+            border-radius: 8px 8px 0 0;
+            overflow: hidden;
+        }
+
+        .kanban-color-bar {
+            height: 6px;
+            width: 100%;
+            cursor: pointer;
+            transition: height 0.15s;
+        }
+
+        .kanban-color-bar:hover {
+            height: 10px;
+        }
+
+        .kanban-header-content {
+            padding: 10px 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .kanban-column-name {
+            cursor: pointer;
+            padding: 2px 4px;
+            border-radius: 4px;
+            transition: background 0.15s;
+            outline: none;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .kanban-column-name:hover {
+            background: rgba(0,0,0,0.05);
+        }
+
+        .kanban-column-name[contenteditable="true"] {
+            background: white;
+            box-shadow: 0 0 0 2px #ff5200;
+        }
+
+        .kanban-header-actions {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+
+        .kanban-column-count {
+            background: rgba(255,255,255,0.6);
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .kanban-delete-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 4px;
+            color: #999;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s;
+        }
+
+        .kanban-delete-btn:hover:not([disabled]) {
+            background: #fee2e2;
+            color: #ef4444;
+        }
+
+        .kanban-delete-btn[disabled] {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        .kanban-color-picker {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            padding: 8px;
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            width: 160px;
+        }
+
+        .kanban-color-option {
+            width: 24px;
+            height: 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: transform 0.1s, box-shadow 0.1s;
+        }
+
+        .kanban-color-option:hover {
+            transform: scale(1.15);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+        }
+
+        .kanban-column-cards {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .kanban-card {
+            background: white;
+            border-radius: 6px;
+            padding: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            cursor: grab;
+            transition: box-shadow 0.15s, transform 0.15s;
+        }
+
+        .kanban-card:hover {
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+
+        .kanban-card:active {
+            cursor: grabbing;
+        }
+
+        .kanban-card.dragging {
+            opacity: 0.5;
+            transform: rotate(2deg);
+        }
+
+        .kanban-card-title {
+            font-size: 14px;
+            font-weight: 500;
+            color: #333;
+            margin-bottom: 6px;
+            line-height: 1.3;
+        }
+
+        .kanban-card-title a {
+            color: #333;
+            text-decoration: none;
+        }
+
+        .kanban-card-title a:hover {
+            text-decoration: underline;
+        }
+
+        .kanban-card-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            align-items: center;
+        }
+
+        .kanban-card-notes {
+            font-size: 12px;
+            color: #666;
+            margin-top: 6px;
+            line-height: 1.4;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .kanban-card-date {
+            font-size: 11px;
+            color: #999;
+            margin-top: 8px;
+        }
+
+        .kanban-column-cards.drag-over {
+            background: rgba(255, 82, 0, 0.05);
+        }
+
+        .kanban-empty {
+            text-align: center;
+            color: #999;
+            font-size: 13px;
+            padding: 20px;
+        }
+
+        /* Add column button */
+        .kanban-add-column {
+            min-width: 200px;
+            background: #e5e5e5;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            border: 2px dashed #ccc;
+            color: #888;
+            font-size: 14px;
+            transition: background 0.15s, border-color 0.15s;
+        }
+
+        .kanban-add-column:hover {
+            background: #ddd;
+            border-color: #999;
+            color: #666;
+        }
+
+        /* AI Processing Spinner */
+        .ai-processing-spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid #fde68a;
+            border-top-color: #ff5200;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-left: 8px;
+            vertical-align: middle;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* View toggle */
+        .view-toggle {
+            display: flex;
+            gap: 4px;
+            background: #f5f5f5;
+            border-radius: 6px;
+            padding: 2px;
+        }
+
+        .view-toggle-btn {
+            padding: 6px 12px;
+            border: none;
+            background: transparent;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            color: #666;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            transition: background 0.15s, color 0.15s;
+        }
+
+        .view-toggle-btn:hover {
+            background: #eee;
+        }
+
+        .view-toggle-btn.active {
+            background: white;
+            color: #333;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+
+        .view-toggle-btn svg {
+            width: 14px;
+            height: 14px;
+        }
+
+        /* Add column modal */
+        .add-column-form {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            padding: 16px;
+        }
+
+        .add-column-form input {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .add-column-form .color-picker {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .add-column-form .color-picker input[type="color"] {
+            width: 40px;
+            height: 32px;
+            padding: 2px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        /* External Search Page Styles */
+        .search-page-header {
+            margin-bottom: 24px;
+        }
+
+        .search-page-header h2 {
+            font-size: 20px;
+            font-weight: 600;
+            color: #333;
+            margin: 0 0 8px 0;
+        }
+
+        .search-page-desc {
+            font-size: 14px;
+            color: #666;
+            margin: 0;
+        }
+
+        .external-search-form {
+            background: #fff;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            margin-bottom: 24px;
+        }
+
+        .search-input-row {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .external-search-input {
+            flex: 1;
+            padding: 12px 16px;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 15px;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+
+        .external-search-input:focus {
+            border-color: #ff5200;
+        }
+
+        .search-services {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+
+        .search-service-check {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            color: #555;
+            cursor: pointer;
+            padding: 6px 12px;
+            border-radius: 6px;
+            background: #f5f5f5;
+            transition: background 0.15s;
+        }
+
+        .search-service-check:hover:not(.disabled) {
+            background: #eee;
+        }
+
+        .search-service-check.disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .search-service-check input {
+            margin: 0;
+        }
+
+        .search-results-container {
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            min-height: 300px;
+        }
+
+        .search-results-placeholder {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 60px 20px;
+            color: #999;
+            text-align: center;
+        }
+
+        .search-results-placeholder p {
+            margin-top: 16px;
+            font-size: 14px;
+            max-width: 400px;
+        }
+
+        .search-loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+            color: #666;
+            gap: 12px;
+        }
+
+        .search-loading .spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid #e0e0e0;
+            border-top-color: #ff5200;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        .search-results-section {
+            padding: 20px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+
+        .search-results-section:last-child {
+            border-bottom: none;
+        }
+
+        .search-results-section h3 {
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+            margin: 0 0 16px 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .search-results-section h3 svg {
+            color: #666;
+        }
+
+        .search-result-count {
+            font-weight: 400;
+            color: #888;
+            font-size: 13px;
+        }
+
+        .search-result-item {
+            padding: 12px 16px;
+            background: #fafafa;
+            border-radius: 6px;
+            margin-bottom: 8px;
+            transition: background 0.15s;
+        }
+
+        .search-result-item:hover {
+            background: #f0f0f0;
+        }
+
+        .search-result-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .search-result-title {
+            font-size: 14px;
+            font-weight: 500;
+            color: #333;
+            margin-bottom: 4px;
+        }
+
+        .search-result-title a {
+            color: #333;
+            text-decoration: none;
+        }
+
+        .search-result-title a:hover {
+            text-decoration: underline;
+            color: #ff5200;
+        }
+
+        .search-result-meta {
+            font-size: 12px;
+            color: #888;
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 6px;
+        }
+
+        .search-result-preview {
+            font-size: 13px;
+            color: #666;
+            line-height: 1.5;
+            margin-top: 6px;
+        }
+
+        .search-result-labels {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+            margin-top: 6px;
+        }
+
+        .search-result-label {
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            background: #e0f2fe;
+            color: #0369a1;
+        }
+
+        .search-result-state {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+
+        .search-result-state.open {
+            background: #dcfce7;
+            color: #166534;
+        }
+
+        .search-result-state.closed {
+            background: #f3e8ff;
+            color: #7c3aed;
+        }
+
+        .search-error {
+            padding: 20px;
+            text-align: center;
+            color: #dc2626;
+        }
+
+        .search-error-icon {
+            margin-bottom: 8px;
+        }
+
+        .search-no-results {
+            padding: 40px 20px;
+            text-align: center;
+            color: #888;
+        }
+
+        #searchPage.active {
+            display: block;
         }
     </style>
 </head>
 <body>
-    <header>
-        <h1>Ultrathink Knowledge Base</h1>
-        <div class="toolbar">
-            <input type="text" id="search" placeholder="Search entries...">
-            <button class="btn btn-primary" id="refreshBtn">Refresh</button>
-            <button class="btn btn-danger" id="deleteSelected" disabled>Delete Selected</button>
-            <span id="entryCount">Loading...</span>
+    <div class="app">
+        <!-- Top Header -->
+        <header class="top-header">
+            <img src="/ultrathink-extension/icons/icon32.png" alt="" class="logo">
+            <h1>Ultrathink</h1>
+        </header>
+
+        <!-- Main Container -->
+        <div class="main-container">
+            <!-- Sidebar -->
+            <aside class="sidebar" id="sidebar">
+                <nav class="sidebar-nav">
+                    <a class="nav-item active" data-page="home">
+                        <svg viewBox="0 0 256 256" fill="currentColor">
+                            <path d="M219.31,108.68l-80-80a16,16,0,0,0-22.62,0l-80,80A15.87,15.87,0,0,0,32,120v96a8,8,0,0,0,8,8H216a8,8,0,0,0,8-8V120A15.87,15.87,0,0,0,219.31,108.68ZM208,208H48V120l80-80,80,80Z"/>
+                        </svg>
+                        <span>Home</span>
+                    </a>
+                    <div class="nav-divider"></div>
+                    <a class="nav-item" data-page="project">
+                        <svg viewBox="0 0 256 256" fill="currentColor">
+                            <path d="M216,72H131.31L104,44.69A15.86,15.86,0,0,0,92.69,40H40A16,16,0,0,0,24,56V200.62A15.4,15.4,0,0,0,39.38,216H216.89A15.13,15.13,0,0,0,232,200.89V88A16,16,0,0,0,216,72ZM40,56H92.69l16,16H40ZM216,200H40V88H216Z"/>
+                        </svg>
+                        <span>Projects</span>
+                    </a>
+                    <a class="nav-item" data-page="task">
+                        <svg viewBox="0 0 256 256" fill="currentColor">
+                            <path d="M224,128a8,8,0,0,1-8,8H40a8,8,0,0,1,0-16H216A8,8,0,0,1,224,128ZM40,72H216a8,8,0,0,0,0-16H40a8,8,0,0,0,0,16ZM216,184H40a8,8,0,0,0,0,16H216a8,8,0,0,0,0-16Z"/>
+                        </svg>
+                        <span>Tasks</span>
+                    </a>
+                    <a class="nav-item" data-page="knowledge">
+                        <svg viewBox="0 0 256 256" fill="currentColor">
+                            <path d="M208,24H72A32,32,0,0,0,40,56V224a8,8,0,0,0,8,8H192a8,8,0,0,0,0-16H56a16,16,0,0,1,16-16H208a8,8,0,0,0,8-8V32A8,8,0,0,0,208,24Zm-8,160H72a31.82,31.82,0,0,0-16,4.29V56A16,16,0,0,1,72,40H200Z"/>
+                        </svg>
+                        <span>Knowledge</span>
+                    </a>
+                    <a class="nav-item" data-page="visualise">
+                        <svg viewBox="0 0 256 256" fill="currentColor">
+                            <path d="M200,152a31.84,31.84,0,0,0-19.53,6.68l-23.11-18A31.65,31.65,0,0,0,160,128a32.06,32.06,0,0,0-.58-6.07l24.93-12.47A32,32,0,1,0,176,88a32.06,32.06,0,0,0,.58,6.07L151.65,106.5A32,32,0,0,0,104,120.3L68.69,100.19a32,32,0,1,0-8,13.92l35.33,20.12A32,32,0,0,0,119.29,152l-12.82,32.06A32,32,0,1,0,120,224a31.88,31.88,0,0,0,17.53-5.22l23.11,18a32,32,0,1,0,39.36-84.78ZM208,72a16,16,0,1,1-16,16A16,16,0,0,1,208,72ZM40,72A16,16,0,1,1,56,88,16,16,0,0,1,40,72Zm64,152a16,16,0,1,1,16-16A16,16,0,0,1,104,224Zm24-80a16,16,0,1,1,16-16A16,16,0,0,1,128,144Zm72,64a16,16,0,1,1,16-16A16,16,0,0,1,200,208Z"/>
+                        </svg>
+                        <span>Visualise</span>
+                    </a>
+                    <a class="nav-item" data-page="search">
+                        <svg viewBox="0 0 256 256" fill="currentColor">
+                            <path d="M229.66,218.34l-50.07-50.06a88.11,88.11,0,1,0-11.31,11.31l50.06,50.07a8,8,0,0,0,11.32-11.32ZM40,112a72,72,0,1,1,72,72A72.08,72.08,0,0,1,40,112Z"/>
+                        </svg>
+                        <span>Search</span>
+                    </a>
+                    <div class="nav-divider"></div>
+                    <a class="nav-item" data-page="topics">
+                        <svg viewBox="0 0 256 256" fill="currentColor">
+                            <path d="M243.31,136,144,36.69A15.86,15.86,0,0,0,132.69,32H40a8,8,0,0,0-8,8v92.69A15.86,15.86,0,0,0,36.69,144L136,243.31a16,16,0,0,0,22.63,0l84.68-84.68a16,16,0,0,0,0-22.63ZM147.31,232,48,132.69V48h84.69L232,147.31ZM96,84A12,12,0,1,1,84,72,12,12,0,0,1,96,84Z"/>
+                        </svg>
+                        <span>Topics</span>
+                    </a>
+                    <a class="nav-item" data-page="people">
+                        <svg viewBox="0 0 256 256" fill="currentColor">
+                            <path d="M117.25,157.92a60,60,0,1,0-66.5,0A95.83,95.83,0,0,0,3.53,195.63a8,8,0,1,0,13.4,8.74,80,80,0,0,1,134.14,0,8,8,0,0,0,13.4-8.74A95.83,95.83,0,0,0,117.25,157.92ZM40,108a44,44,0,1,1,44,44A44.05,44.05,0,0,1,40,108Zm210.14,98.7a8,8,0,0,1-11.07-2.33A79.83,79.83,0,0,0,172,168a8,8,0,0,1,0-16,44,44,0,1,0-16.34-84.87,8,8,0,1,1-5.94-14.85,60,60,0,0,1,55.53,105.64,95.83,95.83,0,0,1,47.22,37.71A8,8,0,0,1,250.14,206.7Z"/>
+                        </svg>
+                        <span>People</span>
+                    </a>
+                </nav>
+            </aside>
+
+            <!-- Content -->
+            <main class="content">
+                <!-- Toolbar -->
+                <div class="toolbar">
+                    <div class="search-box">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="11" cy="11" r="8"/>
+                            <path d="M21 21l-4.35-4.35"/>
+                        </svg>
+                        <input type="text" id="search" placeholder="Search entries...">
+                    </div>
+                    <select class="filter-select" id="filterType">
+                        <option value="">All types</option>
+                    </select>
+                    <select class="filter-select" id="filterSource">
+                        <option value="">All sources</option>
+                    </select>
+                    <select class="filter-select" id="filterEntity">
+                        <option value="">All entities</option>
+                    </select>
+                    <div class="toolbar-right">
+                        <div class="view-toggle" id="viewToggle" style="display: none;">
+                            <button class="view-toggle-btn active" data-view="list" title="List View">
+                                <svg viewBox="0 0 256 256" fill="currentColor">
+                                    <path d="M224,128a8,8,0,0,1-8,8H40a8,8,0,0,1,0-16H216A8,8,0,0,1,224,128ZM40,72H216a8,8,0,0,0,0-16H40a8,8,0,0,0,0,16ZM216,184H40a8,8,0,0,0,0,16H216a8,8,0,0,0,0-16Z"/>
+                                </svg>
+                                List
+                            </button>
+                            <button class="view-toggle-btn" data-view="kanban" title="Kanban Board">
+                                <svg viewBox="0 0 256 256" fill="currentColor">
+                                    <path d="M64,48V208H48a8,8,0,0,0,0,16H208a8,8,0,0,0,0-16H192V48a16,16,0,0,0-16-16H80A16,16,0,0,0,64,48Zm16,0H96V208H80Zm32,0h16V208H112Zm48,160H144V48h16Zm16-160v56h16V48Z"/>
+                                </svg>
+                                Board
+                            </button>
+                        </div>
+                        <span class="entry-count" id="entryCount">Loading...</span>
+                        <button class="btn btn-primary" id="refreshBtn">Refresh</button>
+                        <button class="btn btn-danger" id="deleteSelected" disabled>Delete</button>
+                    </div>
+                </div>
+
+                <!-- Grid -->
+                <div class="grid-container" id="gridContainer">
+                    <div id="kb-table"></div>
+                </div>
+
+                <!-- Kanban Board (for Tasks page) -->
+                <div class="kanban-container" id="kanbanContainer">
+                    <div class="kanban-header">
+                        <h2>Task Board</h2>
+                        <button class="btn btn-default" id="addColumnBtn">+ Add Column</button>
+                    </div>
+                    <div class="kanban-board" id="kanbanBoard">
+                        <!-- Columns dynamically generated -->
+                    </div>
+                </div>
+
+                <!-- Topics Management Page -->
+                <div class="management-page" id="topicsPage">
+                    <div class="management-header">
+                        <h2>Topics</h2>
+                    </div>
+                    <div class="management-list" id="topicsList"></div>
+                    <div class="add-item-row">
+                        <input type="text" id="newTopicInput" placeholder="Add new topic...">
+                        <button class="btn btn-primary" id="addTopicBtn">Add</button>
+                    </div>
+                </div>
+
+                <!-- People Management Page -->
+                <div class="management-page" id="peoplePage">
+                    <div class="management-header">
+                        <h2>People & Roles</h2>
+                    </div>
+                    <div class="management-list" id="peopleList"></div>
+                    <div class="add-item-row">
+                        <input type="text" id="newPersonInput" placeholder="Add new person or role...">
+                        <button class="btn btn-primary" id="addPersonBtn">Add</button>
+                    </div>
+                </div>
+
+                <!-- Visualisation Page -->
+                <div class="management-page" id="visualisePage">
+                    <div class="vis-toolbar">
+                        <div class="search-box">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+                            </svg>
+                            <input type="text" id="visSearch" placeholder="Search nodes...">
+                        </div>
+                        <select class="filter-select" id="visFilterEntity"><option value="">All entities</option></select>
+                        <select class="filter-select" id="visFilterType"><option value="">All types</option></select>
+                        <select class="filter-select" id="visFilterTopic"><option value="">All topics</option></select>
+                        <select class="filter-select" id="visFilterPerson"><option value="">All people</option></select>
+                        <div class="time-filter">
+                            <label>From:</label><input type="date" id="visDateFrom">
+                            <label>To:</label><input type="date" id="visDateTo">
+                        </div>
+                        <div class="toolbar-right">
+                            <button class="btn btn-default" id="visResetBtn">Reset</button>
+                            <button class="btn btn-default" id="visFitBtn">Fit</button>
+                        </div>
+                    </div>
+                    <div class="vis-graph-wrapper">
+                        <div class="vis-container" id="visNetwork"></div>
+                        <div class="vis-stats" id="visStats"></div>
+                        <div class="vis-legend" id="visLegend"></div>
+                    </div>
+                </div>
+
+                <!-- External Search Page -->
+                <div class="management-page" id="searchPage">
+                    <div class="search-page-header">
+                        <h2>Search External Services</h2>
+                        <p class="search-page-desc">Search GitHub, Notion, and other connected services for related content.</p>
+                    </div>
+
+                    <div class="external-search-form">
+                        <div class="search-input-row">
+                            <input type="text" id="externalSearchInput" placeholder="Enter search query..." class="external-search-input">
+                            <button class="btn btn-primary" id="externalSearchBtn">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+                                </svg>
+                                Search
+                            </button>
+                        </div>
+                        <div class="search-services">
+                            <label class="search-service-check">
+                                <input type="checkbox" id="searchGithub" checked>
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+                                GitHub
+                            </label>
+                            <label class="search-service-check disabled" title="Coming soon">
+                                <input type="checkbox" disabled>
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M4 4h6v6H4zm10 0h6v6h-6zM4 14h6v6H4zm10 0h6v6h-6z"/></svg>
+                                Notion
+                            </label>
+                            <label class="search-service-check disabled" title="Coming soon">
+                                <input type="checkbox" disabled>
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/></svg>
+                                Email
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="search-results-container" id="searchResultsContainer">
+                        <div class="search-results-placeholder">
+                            <svg viewBox="0 0 256 256" width="48" height="48" fill="#ccc">
+                                <path d="M229.66,218.34l-50.07-50.06a88.11,88.11,0,1,0-11.31,11.31l50.06,50.07a8,8,0,0,0,11.32-11.32ZM40,112a72,72,0,1,1,72,72A72.08,72.08,0,0,1,40,112Z"/>
+                            </svg>
+                            <p>Enter a search query to find related content across your connected services.</p>
+                        </div>
+                    </div>
+                </div>
+            </main>
         </div>
-    </header>
+    </div>
 
-    <main>
-        <div id="kb-table"></div>
-    </main>
+    <!-- Modal -->
+    <div class="modal-overlay" id="modalOverlay">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title" id="modalTitle"></div>
+                <button class="modal-close" id="modalClose">&times;</button>
+            </div>
+            <div class="modal-body" id="modalBody"></div>
+        </div>
+    </div>
 
+    <!-- Status -->
     <div class="status-message" id="statusMessage"></div>
 
-    <!-- Tabulator JS -->
+    <!-- Scripts -->
     <script src="https://unpkg.com/tabulator-tables@6.2.1/dist/js/tabulator.min.js"></script>
+    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
     <script src="kb-viewer.js"></script>
 </body>
 </html>

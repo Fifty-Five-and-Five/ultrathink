@@ -1,7 +1,24 @@
 #!/usr/bin/env python3
 """
-Native messaging host for UltraThink extension.
-Handles saving URLs and content to kb.md markdown file.
+Native messaging host for UltraThink Chrome extension.
+
+This module handles:
+- Native messaging communication with Chrome extension
+- Saving entries to kb.md markdown knowledge base
+- AI processing pipeline (grammar correction, summarisation, classification)
+- File and screenshot management
+- Desktop widget lifecycle
+
+The host receives JSON messages from the extension via stdin and sends
+responses via stdout. All AI processing runs in background threads to
+avoid blocking the UI.
+
+Entry format in kb.md:
+    - `type` | `source` | `timestamp` | [Title](URL)
+      - Notes: User's notes
+      - Entity: project|task|knowledge
+      - Topics: Topic1, Topic2
+      - AI Summary: Generated summary
 """
 
 import sys
@@ -10,6 +27,10 @@ import struct
 import os
 import re
 import base64
+import urllib.request
+import urllib.error
+import urllib.parse
+import threading
 from pathlib import Path
 from datetime import datetime
 
@@ -31,11 +52,36 @@ BLOCKED_PATHS = [
     '/var',
 ]
 
+# Type mappings for AI Summary strategies
+IMAGE_TYPES = ['screenshot', 'image']
+RESEARCH_TYPES = ['long-note']
+AUDIO_TYPES = ['audio']
+DOCUMENT_TYPES = ['pdf', 'markdown', 'ms-word', 'ms-excel', 'ms-powerpoint', 'ms-onenote']
+LINK_TYPES = ['link', 'chatgpt', 'claude', 'perplexity', 'notion']  # Types that need URL browsing
+TEXT_TYPES = ['snippet', 'note', 'para', 'idea']  # Types that just need text summarisation
+NO_SUMMARY_TYPES = ['video']  # Types that don't get AI summary
+
 
 def validate_project_folder(project_folder):
     """
-    Validate project folder is a safe, absolute path.
-    Returns (is_valid, normalized_path_or_error).
+    Validate that a project folder path is safe and usable.
+
+    Performs security checks to prevent path traversal attacks and
+    writing to system directories.
+
+    Args:
+        project_folder (str): Path to validate.
+
+    Returns:
+        tuple: (is_valid: bool, result: Path|str)
+            If valid, result is the resolved Path object.
+            If invalid, result is an error message string.
+
+    Security checks:
+        - Must be absolute path
+        - Must exist as a directory
+        - Cannot be a system directory (Windows, Program Files, /etc, etc.)
+        - Cannot contain '..' path traversal
     """
     if not project_folder:
         return False, "Project folder cannot be empty"
@@ -72,8 +118,20 @@ def validate_project_folder(project_folder):
 
 def sanitize_filename(filename):
     """
-    Sanitize filename to prevent path traversal.
-    Returns sanitized filename.
+    Sanitize a filename to prevent path traversal and security issues.
+
+    Args:
+        filename (str): Original filename to sanitize.
+
+    Returns:
+        str: Safe filename with only alphanumeric chars, dashes,
+            underscores, dots, and spaces. Max 200 characters.
+
+    Security measures:
+        - Strips path components (only keeps basename)
+        - Removes path separators and null bytes
+        - Removes leading dots (hidden files)
+        - Limits length to 200 characters
     """
     if not filename:
         return 'unnamed_file'
@@ -126,6 +184,1015 @@ def validate_entry(entry):
     return True, None
 
 
+# =============================================================================
+# External Service Integrations
+# =============================================================================
+
+def search_github(query, github_token, repos=None, max_results=10):
+    """
+    Search GitHub for issues, commits, and code related to a query.
+
+    Args:
+        query (str): Search query string.
+        github_token (str): GitHub Personal Access Token.
+        repos (str|None): Comma-separated list of repos to search (e.g., "owner/repo1, owner/repo2").
+                         If None, searches all accessible repos.
+        max_results (int): Maximum results per search type.
+
+    Returns:
+        dict: {
+            'success': bool,
+            'issues': [...],
+            'commits': [...],
+            'error': str (if failed)
+        }
+    """
+    log_file = Path(__file__).parent / 'host.log'
+
+    if not github_token:
+        return {'success': False, 'error': 'GitHub token not configured'}
+
+    if not query or not query.strip():
+        return {'success': False, 'error': 'Search query is empty'}
+
+    results = {
+        'success': True,
+        'issues': [],
+        'commits': [],
+        'query': query
+    }
+
+    headers = {
+        'Authorization': f'Bearer {github_token}',
+        'Accept': 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28'
+    }
+
+    try:
+        # Build query with optional repo filter
+        base_query = query.strip()
+        if repos:
+            # Parse comma-separated repos and add to query
+            repo_list = [r.strip() for r in repos.split(',') if r.strip()]
+            if repo_list:
+                repo_filter = ' '.join([f'repo:{r}' for r in repo_list])
+                base_query = f'{base_query} {repo_filter}'
+
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: GitHub search query: {base_query}\n")
+
+        # Search issues
+        try:
+            issues_url = f'https://api.github.com/search/issues?q={urllib.parse.quote(base_query)}&per_page={max_results}&sort=updated'
+            req = urllib.request.Request(issues_url, headers=headers)
+
+            with urllib.request.urlopen(req, timeout=30) as response:
+                issues_data = json.loads(response.read().decode('utf-8'))
+
+            for item in issues_data.get('items', [])[:max_results]:
+                results['issues'].append({
+                    'number': item.get('number'),
+                    'title': item.get('title'),
+                    'state': item.get('state'),
+                    'url': item.get('html_url'),
+                    'repo': item.get('repository_url', '').split('/')[-1] if item.get('repository_url') else '',
+                    'labels': [l.get('name') for l in item.get('labels', [])],
+                    'created_at': item.get('created_at'),
+                    'updated_at': item.get('updated_at'),
+                    'body_preview': (item.get('body') or '')[:200]
+                })
+
+            with open(log_file, 'a', encoding='utf-8') as f:
+                f.write(f"{datetime.now()}: GitHub found {len(results['issues'])} issues\n")
+
+        except urllib.error.HTTPError as e:
+            with open(log_file, 'a', encoding='utf-8') as f:
+                f.write(f"{datetime.now()}: GitHub issues search error: {e.code} {e.reason}\n")
+
+        # Search commits
+        try:
+            commits_url = f'https://api.github.com/search/commits?q={urllib.parse.quote(base_query)}&per_page={max_results}&sort=committer-date'
+            req = urllib.request.Request(commits_url, headers=headers)
+
+            with urllib.request.urlopen(req, timeout=30) as response:
+                commits_data = json.loads(response.read().decode('utf-8'))
+
+            for item in commits_data.get('items', [])[:max_results]:
+                commit = item.get('commit', {})
+                results['commits'].append({
+                    'sha': item.get('sha', '')[:7],
+                    'message': commit.get('message', '').split('\n')[0][:100],  # First line only
+                    'url': item.get('html_url'),
+                    'repo': item.get('repository', {}).get('full_name', ''),
+                    'author': commit.get('author', {}).get('name', ''),
+                    'date': commit.get('committer', {}).get('date', '')
+                })
+
+            with open(log_file, 'a', encoding='utf-8') as f:
+                f.write(f"{datetime.now()}: GitHub found {len(results['commits'])} commits\n")
+
+        except urllib.error.HTTPError as e:
+            with open(log_file, 'a', encoding='utf-8') as f:
+                f.write(f"{datetime.now()}: GitHub commits search error: {e.code} {e.reason}\n")
+
+        return results
+
+    except urllib.error.HTTPError as e:
+        error_msg = f'GitHub API error: {e.code} {e.reason}'
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: {error_msg}\n")
+        return {'success': False, 'error': error_msg}
+    except Exception as e:
+        error_msg = f'GitHub search error: {str(e)}'
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: {error_msg}\n")
+        return {'success': False, 'error': error_msg}
+
+
+def format_github_results_for_context(github_results):
+    """
+    Format GitHub search results as context text for AI prompts.
+
+    Args:
+        github_results (dict): Results from search_github().
+
+    Returns:
+        str: Formatted text summarising the GitHub findings.
+    """
+    if not github_results.get('success'):
+        return ''
+
+    parts = []
+
+    issues = github_results.get('issues', [])
+    if issues:
+        parts.append(f"**Related GitHub Issues ({len(issues)}):**")
+        for issue in issues[:5]:  # Limit to 5 for context
+            status = '✓' if issue['state'] == 'closed' else '○'
+            labels = f" [{', '.join(issue['labels'][:3])}]" if issue['labels'] else ''
+            parts.append(f"  {status} #{issue['number']}: {issue['title']}{labels}")
+            if issue['body_preview']:
+                parts.append(f"    {issue['body_preview'][:100]}...")
+
+    commits = github_results.get('commits', [])
+    if commits:
+        parts.append(f"\n**Related GitHub Commits ({len(commits)}):**")
+        for commit in commits[:5]:  # Limit to 5 for context
+            parts.append(f"  • {commit['sha']}: {commit['message']} ({commit['author']})")
+
+    return '\n'.join(parts) if parts else ''
+
+
+# =============================================================================
+# AI Classification with OpenAI
+# =============================================================================
+
+def load_topics(project_folder):
+    """Load existing topics from topics.json."""
+    try:
+        topics_file = Path(project_folder) / 'topics.json'
+        if topics_file.exists():
+            with open(topics_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return data.get('topics', [])
+        return []
+    except Exception:
+        return []
+
+
+def save_topics(project_folder, topics):
+    """Save topics to topics.json."""
+    try:
+        topics_file = Path(project_folder) / 'topics.json'
+        # Deduplicate and sort
+        unique_topics = sorted(list(set(topics)))
+        with open(topics_file, 'w', encoding='utf-8') as f:
+            json.dump({'topics': unique_topics}, f, indent=2)
+    except Exception:
+        pass
+
+
+def load_entities(project_folder):
+    """Load existing entities (people & roles) from entities.json."""
+    try:
+        entities_file = Path(project_folder) / 'entities.json'
+        if entities_file.exists():
+            with open(entities_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return data.get('entities', [])
+        return []
+    except Exception:
+        return []
+
+
+def save_entities(project_folder, entities):
+    """Save entities to entities.json."""
+    try:
+        entities_file = Path(project_folder) / 'entities.json'
+        # Deduplicate and sort
+        unique_entities = sorted(list(set(entities)))
+        with open(entities_file, 'w', encoding='utf-8') as f:
+            json.dump({'entities': unique_entities}, f, indent=2)
+    except Exception:
+        pass
+
+
+def classify_entry(entry, api_key, existing_topics, existing_entities, ai_summary=None):
+    """
+    Classify entry using OpenAI API.
+    Returns dict with entity, topics, and people fields.
+    ai_summary: Optional AI-generated summary to provide additional context for classification.
+    """
+    log_file = Path(__file__).parent / 'host.log'
+
+    if not api_key:
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: AI classification skipped - no API key\n")
+        return None
+
+    try:
+        # Build content for classification
+        title = entry.get('title', '')
+        url = entry.get('url', '')
+        notes = entry.get('notes', '')
+        selected_text = entry.get('selectedText', '')
+
+        # Combine all available text content
+        content_parts = [selected_text, notes]
+        if ai_summary:
+            content_parts.append(f"AI Description: {ai_summary}")
+        content = ' '.join(part for part in content_parts if part).strip()
+
+        # Build prompt
+        prompt = f"""Analyze this knowledge base entry and classify it as "project", "task", or "knowledge".
+
+Title: {title}
+URL: {url}
+Content: {content}
+
+ENTITY CLASSIFICATION (in priority order):
+- "project" = References a bigger initiative, project idea, feature request, or something to build. If you see the word "project" it is a project. A video or image on its own is rarely going to be a project unless associated text indicates.
+- "task" = Action item, reminder, todo, something that needs to be done. If you see the word "task" it is a task. Unless you already decided it's a project.
+- "knowledge" = Fact, reference, documentation, information to remember. Unless already decided it's a project or task.
+- "unclassified" = Cannot determine from the content.
+
+TOPIC EXTRACTION:
+Extract 1-5 topic tags. STRONGLY prefer existing topics: {existing_topics}
+- If a topic is similar to an existing one (e.g. "React" vs "ReactJS", "ML" vs "Machine Learning"), use the EXISTING one
+- Only create a new topic if nothing similar exists
+
+PEOPLE EXTRACTION:
+Extract any people names mentioned.
+STRONGLY prefer existing people: {existing_entities}
+- If a name matches an existing person's first name, use the FULL existing name (e.g. "Kevin" -> "Kevin Smith")
+- If a name has a typo but is similar to existing (e.g. "Jon" vs "John"), use the EXISTING correct spelling
+- Only add new people if no similar match exists
+
+Return JSON only:
+{{
+  "entity": "project|task|knowledge|unclassified",
+  "topics": ["topic1", "topic2"],
+  "people": ["Kevin Smith", "Jane Doe"]
+}}"""
+
+        # Call OpenAI Responses API
+        request_data = json.dumps({
+            'model': 'gpt-5-nano',
+            'input': prompt
+        }).encode('utf-8')
+
+        req = urllib.request.Request(
+            'https://api.openai.com/v1/responses',
+            data=request_data,
+            headers={
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {api_key}'
+            }
+        )
+
+        with urllib.request.urlopen(req, timeout=30) as response:
+            result = json.loads(response.read().decode('utf-8'))
+
+        # Extract text from response
+        output_message = None
+        for item in result.get('output', []):
+            if item.get('type') == 'message':
+                output_message = item
+                break
+
+        if not output_message:
+            return None
+
+        text_content = None
+        for content_item in output_message.get('content', []):
+            if content_item.get('type') == 'output_text':
+                text_content = content_item.get('text', '')
+                break
+
+        if not text_content:
+            return None
+
+        # Parse JSON from response (handle markdown code blocks)
+        json_text = text_content.strip()
+        if json_text.startswith('```'):
+            # Remove markdown code block
+            lines = json_text.split('\n')
+            json_text = '\n'.join(lines[1:-1] if lines[-1] == '```' else lines[1:])
+
+        classification = json.loads(json_text)
+
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: AI classification result: {classification}\n")
+
+        return classification
+
+    except urllib.error.HTTPError as e:
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: AI classification HTTP error: {e.code} {e.reason}\n")
+        return None
+    except Exception as e:
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: AI classification error: {str(e)}\n")
+        return None
+
+
+def fix_grammar_openai(text, entry, api_key):
+    """
+    Fix spelling and grammar using OpenAI API.
+    Returns corrected text or original if API fails.
+    """
+    log_file = Path(__file__).parent / 'host.log'
+
+    if not text or not text.strip():
+        return text
+
+    if not api_key:
+        return text
+
+    try:
+        # Build context for better corrections
+        context_info = ''
+        url = entry.get('url', '')
+        title = entry.get('title', '')
+        entry_type = entry.get('type', '')
+
+        if url:
+            try:
+                from urllib.parse import urlparse
+                domain = urlparse(url).hostname
+                if domain:
+                    context_info += f"\nContext: From {domain}"
+            except Exception:
+                pass
+        if title:
+            context_info += f"\nPage: {title[:100]}"
+        if entry_type:
+            context_info += f"\nType: {entry_type}"
+
+        prompt = f"""Fix spelling and grammar errors in this note. Use UK spelling and sentence case. Never use em dash. If you can improve wording and flow without losing meaning do that. If you cannot work out meaning then don't make major changes.
+{context_info}
+Preserve technical terms, jargon, domain-specific language, brands, names of things, people etc. and capitalise them correctly.
+
+Original text: "{text}"
+
+Return JSON only:
+{{"corrected": "the corrected text here"}}"""
+
+        # Call OpenAI Responses API
+        request_data = json.dumps({
+            'model': 'gpt-5-nano',
+            'input': prompt
+        }).encode('utf-8')
+
+        req = urllib.request.Request(
+            'https://api.openai.com/v1/responses',
+            data=request_data,
+            headers={
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {api_key}'
+            }
+        )
+
+        with urllib.request.urlopen(req, timeout=30) as response:
+            result = json.loads(response.read().decode('utf-8'))
+
+        # Extract text from response
+        output_message = None
+        for item in result.get('output', []):
+            if item.get('type') == 'message':
+                output_message = item
+                break
+
+        if not output_message:
+            return text
+
+        text_content = None
+        for content_item in output_message.get('content', []):
+            if content_item.get('type') == 'output_text':
+                text_content = content_item.get('text', '')
+                break
+
+        if not text_content:
+            return text
+
+        # Parse JSON response (handle markdown code blocks)
+        json_text = text_content.strip()
+        if json_text.startswith('```'):
+            lines = json_text.split('\n')
+            json_text = '\n'.join(lines[1:-1] if lines[-1] == '```' else lines[1:])
+
+        try:
+            grammar_result = json.loads(json_text)
+            fixed = grammar_result.get('corrected', text).strip()
+        except json.JSONDecodeError:
+            # Fallback: use raw text if JSON parsing fails
+            fixed = json_text.strip()
+
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: Grammar fix: '{text[:50]}...' -> '{fixed[:50]}...'\n")
+
+        return fixed
+
+    except Exception as e:
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: Grammar fix error: {str(e)}\n")
+        return text
+
+
+# =============================================================================
+# AI Summary Functions
+# =============================================================================
+
+def summarize_image(image_path, api_key):
+    """Generate summary of an image using GPT-5 vision."""
+    log_file = Path(__file__).parent / 'host.log'
+
+    try:
+        # Read and encode image
+        with open(image_path, 'rb') as f:
+            image_data = f.read()
+        base64_image = base64.b64encode(image_data).decode('utf-8')
+
+        # Determine MIME type
+        ext = Path(image_path).suffix.lower()
+        mime_type = 'image/png' if ext == '.png' else 'image/jpeg'
+
+        # Call GPT-5 vision API
+        request_data = json.dumps({
+            'model': 'gpt-5',
+            'input': [{
+                'role': 'user',
+                'content': [
+                    {'type': 'input_text', 'text': 'Describe what is shown in this image in 2-3 sentences. Focus on the key elements and purpose.'},
+                    {'type': 'input_image', 'image_url': f'data:{mime_type};base64,{base64_image}'}
+                ]
+            }]
+        }).encode('utf-8')
+
+        req = urllib.request.Request(
+            'https://api.openai.com/v1/responses',
+            data=request_data,
+            headers={
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {api_key}'
+            }
+        )
+
+        with urllib.request.urlopen(req, timeout=60) as response:
+            result = json.loads(response.read().decode('utf-8'))
+
+        # Extract text from response
+        for item in result.get('output', []):
+            if item.get('type') == 'message':
+                for content_item in item.get('content', []):
+                    if content_item.get('type') == 'output_text':
+                        summary = content_item.get('text', '').strip()
+                        with open(log_file, 'a', encoding='utf-8') as f:
+                            f.write(f"{datetime.now()}: Image summary generated: {summary[:100]}...\n")
+                        return summary
+
+        return None
+
+    except Exception as e:
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: summarize_image error: {str(e)}\n")
+        return None
+
+
+def summarize_with_research(notes, api_key):
+    """Generate summary with web research using GPT-5 web search."""
+    log_file = Path(__file__).parent / 'host.log'
+
+    try:
+        request_data = json.dumps({
+            'model': 'gpt-5',
+            'tools': [{'type': 'web_search'}],
+            'input': f'Do background research on this topic and provide a 2-3 paragraph summary:\n\n{notes}'
+        }).encode('utf-8')
+
+        req = urllib.request.Request(
+            'https://api.openai.com/v1/responses',
+            data=request_data,
+            headers={
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {api_key}'
+            }
+        )
+
+        with urllib.request.urlopen(req, timeout=90) as response:  # Longer timeout for web search
+            result = json.loads(response.read().decode('utf-8'))
+
+        # Extract text from response
+        for item in result.get('output', []):
+            if item.get('type') == 'message':
+                for content_item in item.get('content', []):
+                    if content_item.get('type') == 'output_text':
+                        summary = content_item.get('text', '').strip()
+                        with open(log_file, 'a', encoding='utf-8') as f:
+                            f.write(f"{datetime.now()}: Research summary generated: {summary[:100]}...\n")
+                        return summary
+
+        return None
+
+    except Exception as e:
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: summarize_with_research error: {str(e)}\n")
+        return None
+
+
+def summarize_audio(audio_path, api_key, notes=''):
+    """Transcribe audio with Whisper, then summarize with speaker identification."""
+    log_file = Path(__file__).parent / 'host.log'
+
+    try:
+        # Read audio file
+        with open(audio_path, 'rb') as f:
+            audio_data = f.read()
+
+        # Get filename for API
+        filename = Path(audio_path).name
+
+        # Create multipart form data for transcription
+        boundary = '----WebKitFormBoundary7MA4YWxkTrZu0gW'
+        body = (
+            f'--{boundary}\r\n'
+            f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
+            f'Content-Type: audio/mpeg\r\n\r\n'
+        ).encode('utf-8') + audio_data + (
+            f'\r\n--{boundary}\r\n'
+            f'Content-Disposition: form-data; name="model"\r\n\r\n'
+            f'gpt-4o-transcribe\r\n'
+            f'--{boundary}--\r\n'
+        ).encode('utf-8')
+
+        req = urllib.request.Request(
+            'https://api.openai.com/v1/audio/transcriptions',
+            data=body,
+            headers={
+                'Content-Type': f'multipart/form-data; boundary={boundary}',
+                'Authorization': f'Bearer {api_key}'
+            }
+        )
+
+        with urllib.request.urlopen(req, timeout=120) as response:
+            transcription_result = json.loads(response.read().decode('utf-8'))
+
+        transcript = transcription_result.get('text', '')
+
+        if not transcript:
+            return None
+
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: Audio transcribed: {transcript[:100]}...\n")
+
+        # Build prompt with context from notes if available
+        notes_context = ''
+        if notes:
+            notes_context = f'\n\nUser notes about this audio: {notes}'
+
+        prompt = f'''Analyze this audio transcript and provide:
+
+1. **Summary**: A 2-3 sentence description of what is discussed/happening in this audio.
+
+2. **Speakers**: Based on the content, speaking styles, and any context provided, attempt to identify who is speaking. List speakers as "Speaker 1", "Speaker 2" etc, and if you can infer names or roles from context, include them (e.g., "Speaker 1 (likely John, the manager)").
+
+3. **Transcript**: Include the full transcript below.
+{notes_context}
+
+TRANSCRIPT:
+{transcript}'''
+
+        summary_request = json.dumps({
+            'model': 'gpt-5-nano',
+            'input': prompt
+        }).encode('utf-8')
+
+        req = urllib.request.Request(
+            'https://api.openai.com/v1/responses',
+            data=summary_request,
+            headers={
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {api_key}'
+            }
+        )
+
+        with urllib.request.urlopen(req, timeout=30) as response:
+            result = json.loads(response.read().decode('utf-8'))
+
+        for item in result.get('output', []):
+            if item.get('type') == 'message':
+                for content_item in item.get('content', []):
+                    if content_item.get('type') == 'output_text':
+                        summary = content_item.get('text', '').strip()
+                        with open(log_file, 'a', encoding='utf-8') as f:
+                            f.write(f"{datetime.now()}: Audio summary generated: {summary[:100]}...\n")
+                        return summary
+
+        return None
+
+    except Exception as e:
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: summarize_audio error: {str(e)}\n")
+        return None
+
+
+def summarize_document(file_path, entry_type, api_key):
+    """Summarize a document (PDF, markdown, Office files)."""
+    log_file = Path(__file__).parent / 'host.log'
+
+    try:
+        content = None
+
+        if entry_type == 'markdown':
+            # Read markdown directly
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+        elif entry_type == 'pdf':
+            # Use GPT-5 vision for PDF (send as image)
+            with open(file_path, 'rb') as f:
+                pdf_data = f.read()
+            base64_pdf = base64.b64encode(pdf_data).decode('utf-8')
+
+            request_data = json.dumps({
+                'model': 'gpt-5',
+                'input': [{
+                    'role': 'user',
+                    'content': [
+                        {'type': 'input_text', 'text': 'Summarise this PDF document in 2-3 sentences. What is the main topic and key points?'},
+                        {'type': 'input_file', 'file_data': f'data:application/pdf;base64,{base64_pdf}'}
+                    ]
+                }]
+            }).encode('utf-8')
+
+            req = urllib.request.Request(
+                'https://api.openai.com/v1/responses',
+                data=request_data,
+                headers={
+                    'Content-Type': 'application/json',
+                    'Authorization': f'Bearer {api_key}'
+                }
+            )
+
+            with urllib.request.urlopen(req, timeout=60) as response:
+                result = json.loads(response.read().decode('utf-8'))
+
+            for item in result.get('output', []):
+                if item.get('type') == 'message':
+                    for content_item in item.get('content', []):
+                        if content_item.get('type') == 'output_text':
+                            summary = content_item.get('text', '').strip()
+                            with open(log_file, 'a', encoding='utf-8') as f:
+                                f.write(f"{datetime.now()}: PDF summary generated: {summary[:100]}...\n")
+                            return summary
+            return None
+        else:
+            # For Office docs, try to read as text (basic approach)
+            # Full Office support would need python-docx, openpyxl, etc.
+            try:
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read()[:5000]  # Limit to first 5000 chars
+            except Exception:
+                with open(log_file, 'a', encoding='utf-8') as f:
+                    f.write(f"{datetime.now()}: Could not read {entry_type} file as text\n")
+                return None
+
+        if not content or len(content.strip()) < 10:
+            return None
+
+        # Summarize the text content
+        request_data = json.dumps({
+            'model': 'gpt-5-nano',
+            'input': f'Summarise this document in 2-3 sentences:\n\n{content[:4000]}'
+        }).encode('utf-8')
+
+        req = urllib.request.Request(
+            'https://api.openai.com/v1/responses',
+            data=request_data,
+            headers={
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {api_key}'
+            }
+        )
+
+        with urllib.request.urlopen(req, timeout=30) as response:
+            result = json.loads(response.read().decode('utf-8'))
+
+        for item in result.get('output', []):
+            if item.get('type') == 'message':
+                for content_item in item.get('content', []):
+                    if content_item.get('type') == 'output_text':
+                        summary = content_item.get('text', '').strip()
+                        with open(log_file, 'a', encoding='utf-8') as f:
+                            f.write(f"{datetime.now()}: Document summary generated: {summary[:100]}...\n")
+                        return summary
+
+        return None
+
+    except Exception as e:
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: summarize_document error: {str(e)}\n")
+        return None
+
+
+def summarize_link(entry, api_key):
+    """
+    Summarize a web link by browsing and analysing its content.
+
+    Uses GPT-5 with web search capability to fetch and understand the
+    linked page, then generates a comprehensive summary with sources.
+
+    Args:
+        entry (dict): Entry containing 'url', 'title', and optional 'notes'.
+        api_key (str): OpenAI API key.
+
+    Returns:
+        str|None: Summary text with sources appended, or None on failure.
+
+    API configuration:
+        - Model: gpt-5
+        - Tools: web_search (to fetch page content)
+        - Reasoning effort: medium
+        - Timeout: 90 seconds
+    """
+    log_file = Path(__file__).parent / 'host.log'
+
+    try:
+        title = entry.get('title', '')
+        url = entry.get('url', '')
+        notes = entry.get('notes', '')
+
+        if not url:
+            # No URL to browse - fall back to basic summary
+            return summarize_text(entry, api_key)
+
+        prompt = f"""Browse this URL and provide a comprehensive summary of the page content.
+
+URL: {url}
+Page title: {title}
+User notes: {notes if notes else 'None'}
+
+Search the web for useful links, evidence, extra context or additional information related to this page. Cite all sources in your response.
+
+Provide:
+1. A 2-3 sentence summary of what the page is about
+2. Key information, facts, or takeaways from the content
+3. Any relevant context, related links, or supporting evidence you found
+4. List all sources at the end"""
+
+        request_data = json.dumps({
+            'model': 'gpt-5',
+            'tools': [{'type': 'web_search'}],
+            'include': ['web_search_call.action.sources'],
+            'reasoning': {'effort': 'medium'},
+            'input': prompt
+        }).encode('utf-8')
+
+        req = urllib.request.Request(
+            'https://api.openai.com/v1/responses',
+            data=request_data,
+            headers={
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {api_key}'
+            }
+        )
+
+        with urllib.request.urlopen(req, timeout=90) as response:  # Longer timeout for reasoning
+            result = json.loads(response.read().decode('utf-8'))
+
+        # Extract summary text and sources
+        summary_text = None
+        sources = []
+
+        for item in result.get('output', []):
+            if item.get('type') == 'message':
+                for content_item in item.get('content', []):
+                    if content_item.get('type') == 'output_text':
+                        summary_text = content_item.get('text', '').strip()
+            elif item.get('type') == 'web_search_call':
+                # Extract sources if available
+                action = item.get('action', {})
+                for source in action.get('sources', []):
+                    source_url = source.get('url', '')
+                    source_title = source.get('title', '')
+                    if source_url:
+                        sources.append(f"[{source_title}]({source_url})" if source_title else source_url)
+
+        if summary_text:
+            # Append sources if available
+            if sources:
+                summary_text += f"\n\nSources: {', '.join(sources[:3])}"  # Limit to 3 sources
+
+            with open(log_file, 'a', encoding='utf-8') as f:
+                f.write(f"{datetime.now()}: Link summary generated (web+reasoning): {summary_text[:100]}...\n")
+            return summary_text
+
+        return None
+
+    except Exception as e:
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: summarize_link error: {str(e)}\n")
+        return None
+
+
+def summarize_text(entry, api_key):
+    """Summarize text content (snippets, notes, ideas, paragraphs)."""
+    log_file = Path(__file__).parent / 'host.log'
+
+    try:
+        notes = entry.get('notes', '')
+        selected_text = entry.get('selectedText', '')
+
+        # Use whichever text is available
+        text = selected_text or notes
+        if not text or not text.strip():
+            return None
+
+        prompt = f"""Summarise this text in 1-2 sentences:
+
+{text[:2000]}
+
+Return just the summary."""
+
+        request_data = json.dumps({
+            'model': 'gpt-5-nano',
+            'input': prompt
+        }).encode('utf-8')
+
+        req = urllib.request.Request(
+            'https://api.openai.com/v1/responses',
+            data=request_data,
+            headers={
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {api_key}'
+            }
+        )
+
+        with urllib.request.urlopen(req, timeout=30) as response:
+            result = json.loads(response.read().decode('utf-8'))
+
+        for item in result.get('output', []):
+            if item.get('type') == 'message':
+                for content_item in item.get('content', []):
+                    if content_item.get('type') == 'output_text':
+                        summary = content_item.get('text', '').strip()
+                        with open(log_file, 'a', encoding='utf-8') as f:
+                            f.write(f"{datetime.now()}: Text summary generated: {summary[:100]}...\n")
+                        return summary
+
+        return None
+
+    except Exception as e:
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: summarize_text error: {str(e)}\n")
+        return None
+
+
+def generate_ai_summary(entry_type, entry, file_path, api_key):
+    """
+    Route to the appropriate AI summary function based on entry type.
+
+    Dispatches to specialised summary functions depending on content type:
+    - Images/screenshots: Vision analysis
+    - Audio: Whisper transcription + analysis
+    - Documents: Text extraction + summarisation
+    - Links: Web browsing + summarisation
+    - Text: Direct summarisation
+
+    Args:
+        entry_type (str): Type of entry ('screenshot', 'audio', 'pdf', etc.).
+        entry (dict): Entry data with notes, selectedText, url, etc.
+        file_path (str|None): Path to associated file, if any.
+        api_key (str): OpenAI API key.
+
+    Returns:
+        str|None: Generated summary text, or None if skipped/failed.
+    """
+    log_file = Path(__file__).parent / 'host.log'
+
+    try:
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: Generating AI summary for type: {entry_type}\n")
+
+        # Skip types that don't need summary
+        if entry_type in NO_SUMMARY_TYPES:
+            with open(log_file, 'a', encoding='utf-8') as f:
+                f.write(f"{datetime.now()}: Skipping AI summary for type: {entry_type}\n")
+            return None
+
+        if entry_type in IMAGE_TYPES:
+            if file_path:
+                return summarize_image(file_path, api_key)
+        elif entry_type in RESEARCH_TYPES:
+            notes = entry.get('notes', '')
+            if notes:
+                return summarize_with_research(notes, api_key)
+        elif entry_type in AUDIO_TYPES:
+            if file_path:
+                notes = entry.get('notes', '')
+                return summarize_audio(file_path, api_key, notes)
+        elif entry_type in DOCUMENT_TYPES:
+            if file_path:
+                return summarize_document(file_path, entry_type, api_key)
+        elif entry_type in TEXT_TYPES:
+            return summarize_text(entry, api_key)
+        elif entry_type in LINK_TYPES:
+            return summarize_link(entry, api_key)
+        else:
+            # Default: try text summary for unknown types
+            return summarize_text(entry, api_key)
+
+        return None
+
+    except Exception as e:
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: generate_ai_summary error: {str(e)}\n")
+        return None
+
+
+def add_summary_to_entry(project_folder, timestamp, summary):
+    """Add AI Summary metadata line to an existing kb.md entry."""
+    log_file = Path(__file__).parent / 'host.log'
+
+    try:
+        is_valid, result = validate_project_folder(project_folder)
+        if not is_valid:
+            return False
+
+        folder_path = result
+        kb_file = folder_path / 'kb.md'
+
+        if not kb_file.exists():
+            return False
+
+        with open(kb_file, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+
+        # Find entry with matching timestamp
+        i = 0
+        while i < len(lines):
+            if f'`{timestamp}`' in lines[i]:
+                # Found entry - find where to insert summary (after classification)
+                j = i + 1
+                insert_pos = j
+
+                while j < len(lines):
+                    if lines[j].startswith('- '):
+                        # Hit next entry
+                        insert_pos = j
+                        break
+                    elif lines[j].strip() == '':
+                        # Hit blank line (end of entry)
+                        insert_pos = j
+                        break
+                    j += 1
+                else:
+                    insert_pos = len(lines)
+
+                # Clean up summary (remove newlines, keep full content)
+                clean_summary = ' '.join(summary.split())
+
+                # Insert summary line
+                lines.insert(insert_pos, f"  - AI Summary: {clean_summary}\n")
+
+                # Write back
+                with open(kb_file, 'w', encoding='utf-8') as f:
+                    f.writelines(lines)
+
+                with open(log_file, 'a', encoding='utf-8') as f:
+                    f.write(f"{datetime.now()}: AI Summary added for {timestamp}\n")
+
+                return True
+
+            i += 1
+
+        return False
+
+    except Exception as e:
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: add_summary_to_entry error: {str(e)}\n")
+        return False
+
+
 def read_message():
     """Read a message from stdin (sent by extension)."""
     # Read the message length (first 4 bytes)
@@ -152,7 +1219,7 @@ def send_message(message):
     sys.stdout.buffer.flush()
 
 
-def format_markdown_entry(entry, screenshot_path=None, file_path=None):
+def format_markdown_entry(entry, screenshot_path=None, file_path=None, classification=None):
     """Format entry data as markdown with consistent structure.
 
     Format: - `type` | `source` | `timestamp` | [Title](URL) | `group: Name (color)`
@@ -193,13 +1260,8 @@ def format_markdown_entry(entry, screenshot_path=None, file_path=None):
     if selected_text:
         # Clean up and format as blockquote
         text_lines = [line.strip() for line in selected_text.split('\n') if line.strip()]
-        if len(text_lines) <= 5:
-            for line in text_lines:
-                lines.append(f"  - > {line}")
-        else:
-            for line in text_lines[:5]:
-                lines.append(f"  - > {line}")
-            lines.append(f"  - > _(... {len(text_lines) - 5} more lines)_")
+        for line in text_lines:
+            lines.append(f"  - > {line}")
 
     # Add screenshot image reference
     if screenshot_path:
@@ -218,10 +1280,44 @@ def format_markdown_entry(entry, screenshot_path=None, file_path=None):
             lines.append(f"  - Notes: {note_lines[0]}")
         else:
             lines.append(f"  - Notes: {note_lines[0]}")
-            for line in note_lines[1:5]:
+            for line in note_lines[1:]:
                 lines.append(f"    {line}")
-            if len(note_lines) > 5:
-                lines.append(f"    _(... {len(note_lines) - 5} more lines)_")
+
+    # Add page metadata if present (optional fields)
+    page_meta = entry.get('pageMetadata')
+    if page_meta:
+        desc = page_meta.get('description', '').strip()
+        og_image = page_meta.get('ogImage', '').strip()
+        author = page_meta.get('author', '').strip()
+        pub_date = page_meta.get('publishedDate', '').strip()
+        read_time = page_meta.get('readingTime')
+
+        if desc:
+            # Truncate long descriptions
+            if len(desc) > 200:
+                desc = desc[:197] + '...'
+            lines.append(f"  - Description: {desc}")
+        if og_image:
+            lines.append(f"  - Image: {og_image}")
+        if author:
+            lines.append(f"  - Author: {author}")
+        if pub_date:
+            lines.append(f"  - Published: {pub_date}")
+        if read_time and read_time > 0:
+            lines.append(f"  - ReadTime: {read_time} min")
+
+    # Add AI classification metadata if present
+    if classification:
+        entity = classification.get('entity', '')
+        topics = classification.get('topics', [])
+        people = classification.get('people', [])
+
+        if entity:
+            lines.append(f"  - Entity: {entity}")
+        if topics:
+            lines.append(f"  - Topics: {', '.join(topics)}")
+        if people:
+            lines.append(f"  - People: {', '.join(people)}")
 
     lines.append('')  # Single blank line between entries
 
@@ -325,8 +1421,8 @@ def save_file(project_folder, file_data_url, filename, timestamp):
         return None
 
 
-def append_to_kb(project_folder, entry):
-    """Append entry to kb.md file (at the top)."""
+def append_to_kb(project_folder, entry, api_key=None):
+    """Append entry to kb.md file (at the top) with optional AI classification."""
     try:
         # Validate project folder
         is_valid, result = validate_project_folder(project_folder)
@@ -365,8 +1461,8 @@ def append_to_kb(project_folder, entry):
             if not file_path:
                 return {'success': False, 'error': 'Failed to save file'}
 
-        # Format the new entry
-        new_content = format_markdown_entry(entry, screenshot_path, file_path)
+        # Format entry WITHOUT classification (classification runs in background via separate call)
+        new_content = format_markdown_entry(entry, screenshot_path, file_path, classification=None)
 
         # Read existing content if file exists
         existing_content = ''
@@ -380,7 +1476,21 @@ def append_to_kb(project_folder, entry):
             if existing_content:
                 f.write(existing_content)
 
-        return {'success': True, 'file': str(kb_file)}
+        # Return success and background task info
+        # main() will send response first, then run background processing
+        # Include file path for AI summary (screenshot or uploaded file)
+        saved_file_path = screenshot_path or file_path  # Relative path like "screenshots/file.png"
+        return {
+            'success': True,
+            'file': str(kb_file),
+            '_background_task': {
+                'project_folder': project_folder,
+                'timestamp': entry['captured'],
+                'entry': entry,
+                'api_key': api_key,
+                'file_path': str(folder_path / saved_file_path) if saved_file_path else None
+            } if api_key else None
+        }
 
     except Exception as e:
         return {'success': False, 'error': str(e)}
@@ -457,6 +1567,344 @@ def update_last_entry(project_folder, timestamp, new_content):
             return {'success': False, 'error': f'Entry with timestamp {timestamp} not found'}
 
     except Exception as e:
+        return {'success': False, 'error': str(e)}
+
+
+def update_entry_notes(project_folder, timestamp, new_notes):
+    """Update the Notes: line of an entry with matching timestamp."""
+    log_file = Path(__file__).parent / 'host.log'
+
+    try:
+        # Validate project folder
+        is_valid, result = validate_project_folder(project_folder)
+        if not is_valid:
+            return False
+
+        folder_path = result
+        kb_file = folder_path / 'kb.md'
+
+        if not kb_file.exists():
+            return False
+
+        with open(kb_file, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+
+        # Find entry with matching timestamp
+        updated = False
+        i = 0
+        while i < len(lines):
+            if f'`{timestamp}`' in lines[i]:
+                # Found entry - look for Notes: line and any continuation lines
+                j = i + 1
+                notes_start = -1
+                notes_end = -1
+
+                while j < len(lines):
+                    if lines[j].startswith('  - Notes:'):
+                        notes_start = j
+                        notes_end = j + 1
+                        # Find continuation lines (4-space indent, not starting with "  - ")
+                        while notes_end < len(lines):
+                            if lines[notes_end].startswith('    ') and not lines[notes_end].startswith('  - '):
+                                notes_end += 1
+                            else:
+                                break
+                        break
+                    elif lines[j].startswith('- ') or lines[j].strip() == '':
+                        # Hit next entry or blank line - no notes found
+                        break
+                    j += 1
+
+                # Build new notes lines
+                note_lines_list = [line.strip() for line in new_notes.split('\n') if line.strip()]
+                new_note_lines = []
+                if note_lines_list:
+                    new_note_lines.append(f"  - Notes: {note_lines_list[0]}\n")
+                    for line in note_lines_list[1:]:
+                        new_note_lines.append(f"    {line}\n")
+
+                if notes_start >= 0:
+                    # Replace existing notes (including continuation lines)
+                    lines[notes_start:notes_end] = new_note_lines
+                    updated = True
+                elif new_notes.strip():
+                    # Insert new notes after selected text, screenshots, attachments
+                    insert_pos = i + 1
+                    while insert_pos < len(lines):
+                        line = lines[insert_pos]
+                        if line.startswith('  - >') or line.startswith('  - ![') or line.startswith('  - ['):
+                            insert_pos += 1
+                        else:
+                            break
+                    for idx, note_line in enumerate(new_note_lines):
+                        lines.insert(insert_pos + idx, note_line)
+                    updated = True
+
+                break
+            i += 1
+
+        if updated:
+            with open(kb_file, 'w', encoding='utf-8') as f:
+                f.writelines(lines)
+            with open(log_file, 'a', encoding='utf-8') as f:
+                f.write(f"{datetime.now()}: Notes updated for {timestamp}\n")
+            return True
+
+        return False
+
+    except Exception as e:
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: update_entry_notes error: {str(e)}\n")
+        return False
+
+
+def background_process_entry(project_folder, timestamp, entry, api_key, file_path=None):
+    """
+    Background thread for AI processing pipeline.
+
+    Runs after the initial save returns to the UI, performing:
+    1. Grammar correction on user notes
+    2. AI summary generation (type-specific)
+    3. Classification (entity, topics, people extraction)
+
+    Each step's results are written back to kb.md incrementally.
+
+    Args:
+        project_folder (str): Path to project folder containing kb.md.
+        timestamp (str): Entry timestamp for identification.
+        entry (dict): Original entry data.
+        api_key (str): OpenAI API key.
+        file_path (str|None): Path to associated file for summarisation.
+    """
+    log_file = Path(__file__).parent / 'host.log'
+
+    try:
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: Background thread started for {timestamp}\n")
+
+        notes = entry.get('notes', '').strip()
+
+        # STEP 1: Grammar fix (faster) - only fix notes, not selectedText
+        if notes and api_key:
+            fixed_notes = fix_grammar_openai(notes, entry, api_key)
+            if fixed_notes and fixed_notes != notes:
+                update_entry_notes(project_folder, timestamp, fixed_notes)
+                # Update entry dict for later steps to use corrected notes
+                entry['notes'] = fixed_notes
+
+        # STEP 2: AI Summary (before classification so summary can inform classification)
+        summary = None
+        if api_key:
+            entry_type = entry.get('type', '')
+            summary = generate_ai_summary(entry_type, entry, file_path, api_key)
+            if summary:
+                add_summary_to_entry(project_folder, timestamp, summary)
+
+        # STEP 3: Classification (uses notes + summary for better context)
+        if api_key:
+            existing_topics = load_topics(project_folder)
+            existing_entities = load_entities(project_folder)
+            classification = classify_entry(entry, api_key, existing_topics, existing_entities, summary)
+
+            if classification:
+                # Save topics/entities to JSON files
+                new_topics = classification.get('topics', [])
+                new_entities = classification.get('people', [])
+
+                if new_topics:
+                    save_topics(project_folder, existing_topics + new_topics)
+                if new_entities:
+                    save_entities(project_folder, existing_entities + new_entities)
+
+                # Add classification metadata to kb.md entry
+                add_classification_to_entry(project_folder, timestamp, classification)
+
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: Background thread completed for {timestamp}\n")
+
+    except Exception as e:
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: Background thread error: {str(e)}\n")
+
+
+def add_classification_to_entry(project_folder, timestamp, classification):
+    """Add Entity/Topics/People metadata lines to an existing kb.md entry."""
+    log_file = Path(__file__).parent / 'host.log'
+
+    try:
+        is_valid, result = validate_project_folder(project_folder)
+        if not is_valid:
+            return False
+
+        folder_path = result
+        kb_file = folder_path / 'kb.md'
+
+        if not kb_file.exists():
+            return False
+
+        with open(kb_file, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+
+        # Find entry with matching timestamp
+        i = 0
+        while i < len(lines):
+            if f'`{timestamp}`' in lines[i]:
+                # Found entry - find where to insert classification
+                j = i + 1
+                insert_pos = j
+
+                while j < len(lines):
+                    if lines[j].startswith('- '):
+                        # Hit next entry
+                        insert_pos = j
+                        break
+                    elif lines[j].strip() == '':
+                        # Hit blank line (end of entry)
+                        insert_pos = j
+                        break
+                    j += 1
+                else:
+                    insert_pos = len(lines)
+
+                # Build classification lines
+                class_lines = []
+                entity = classification.get('entity', '')
+                topics = classification.get('topics', [])
+                people = classification.get('people', [])
+
+                if entity:
+                    class_lines.append(f"  - Entity: {entity}\n")
+                    # If classified as task, add default Status for kanban board
+                    if entity == 'task':
+                        class_lines.append(f"  - Status: not-started\n")
+                if topics:
+                    class_lines.append(f"  - Topics: {', '.join(topics)}\n")
+                if people:
+                    class_lines.append(f"  - People: {', '.join(people)}\n")
+
+                # Insert classification lines
+                for idx, cl in enumerate(class_lines):
+                    lines.insert(insert_pos + idx, cl)
+
+                # Write back
+                with open(kb_file, 'w', encoding='utf-8') as f:
+                    f.writelines(lines)
+
+                with open(log_file, 'a', encoding='utf-8') as f:
+                    f.write(f"{datetime.now()}: Classification added for {timestamp}: {classification}\n")
+
+                return True
+
+            i += 1
+
+        return False
+
+    except Exception as e:
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: add_classification_to_entry error: {str(e)}\n")
+        return False
+
+
+def classify_and_update_entry(project_folder, timestamp, entry, api_key):
+    """Classify entry and update kb.md with Entity/Topics/People metadata (background process)."""
+    log_file = Path(__file__).parent / 'host.log'
+
+    try:
+        # Validate project folder
+        is_valid, result = validate_project_folder(project_folder)
+        if not is_valid:
+            return {'success': False, 'error': result}
+
+        folder_path = result
+        kb_file = folder_path / 'kb.md'
+
+        if not kb_file.exists():
+            return {'success': False, 'error': 'kb.md file does not exist'}
+
+        # Load existing topics and entities
+        existing_topics = load_topics(project_folder)
+        existing_entities = load_entities(project_folder)
+
+        # Perform AI classification
+        classification = classify_entry(entry, api_key, existing_topics, existing_entities)
+
+        if not classification:
+            with open(log_file, 'a', encoding='utf-8') as f:
+                f.write(f"{datetime.now()}: Classification returned no result for {timestamp}\n")
+            return {'success': True, 'message': 'No classification data'}
+
+        # Update topics and entities JSON files
+        new_topics = classification.get('topics', [])
+        new_entities = classification.get('people', [])
+
+        if new_topics:
+            save_topics(project_folder, existing_topics + new_topics)
+        if new_entities:
+            save_entities(project_folder, existing_entities + new_entities)
+
+        # Read kb.md and find entry by timestamp
+        with open(kb_file, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+
+        # Find the entry with matching timestamp and add classification metadata
+        updated = False
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+
+            if f'`{timestamp}`' in line:
+                # Found the entry - find where to insert classification metadata
+                # Look for end of this entry (next main entry line or end of file)
+                j = i + 1
+                insert_pos = j
+
+                while j < len(lines):
+                    if lines[j].startswith('- '):
+                        # Hit next entry
+                        insert_pos = j
+                        break
+                    elif lines[j].strip() == '':
+                        # Hit blank line (end of entry)
+                        insert_pos = j
+                        break
+                    j += 1
+                else:
+                    insert_pos = len(lines)
+
+                # Build classification lines
+                class_lines = []
+                entity = classification.get('entity', '')
+                topics = classification.get('topics', [])
+                people = classification.get('people', [])
+
+                if entity:
+                    class_lines.append(f"  - Entity: {entity}\n")
+                if topics:
+                    class_lines.append(f"  - Topics: {', '.join(topics)}\n")
+                if people:
+                    class_lines.append(f"  - People: {', '.join(people)}\n")
+
+                # Insert classification lines before blank line / next entry
+                for idx, cl in enumerate(class_lines):
+                    lines.insert(insert_pos + idx, cl)
+
+                updated = True
+                break
+
+            i += 1
+
+        if updated:
+            with open(kb_file, 'w', encoding='utf-8') as f:
+                f.writelines(lines)
+            with open(log_file, 'a', encoding='utf-8') as f:
+                f.write(f"{datetime.now()}: Classification metadata added for {timestamp}\n")
+            return {'success': True, 'message': 'Classification added', 'classification': classification}
+        else:
+            return {'success': False, 'error': f'Entry with timestamp {timestamp} not found'}
+
+    except Exception as e:
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: classify_and_update_entry error: {str(e)}\n")
         return {'success': False, 'error': str(e)}
 
 
@@ -557,9 +2005,31 @@ def main():
             if message.get('action') == 'append':
                 project_folder = message.get('projectFolder')
                 entry = message.get('entry')
+                api_key = message.get('apiKey')  # API key for AI classification
 
-                result = append_to_kb(project_folder, entry)
+                result = append_to_kb(project_folder, entry, api_key)
+
+                # Extract background task before sending (don't send internal field to extension)
+                background_task = result.pop('_background_task', None)
+
+                # Send response immediately so UI is unblocked
                 send_message(result)
+
+                # Now run background processing (grammar + classification + summary)
+                if background_task:
+                    try:
+                        background_process_entry(
+                            background_task['project_folder'],
+                            background_task['timestamp'],
+                            background_task['entry'],
+                            background_task['api_key'],
+                            background_task.get('file_path')
+                        )
+                    except Exception as bg_error:
+                        with open(log_file, 'a', encoding='utf-8') as f:
+                            f.write(f"{datetime.now()}: Background processing error: {str(bg_error)}\n")
+
+                continue  # Skip the send_message at the end since we already sent
             elif message.get('action') == 'update_last_entry':
                 project_folder = message.get('projectFolder')
                 timestamp = message.get('timestamp')
@@ -575,6 +2045,24 @@ def main():
                 send_message(result)
             elif message.get('action') == 'browse_folder':
                 result = browse_folder()
+                send_message(result)
+            elif message.get('action') == 'classify_entry':
+                # Background classification - called after grammar fix completes
+                project_folder = message.get('projectFolder')
+                timestamp = message.get('timestamp')
+                entry = message.get('entry')
+                api_key = message.get('apiKey')
+
+                result = classify_and_update_entry(project_folder, timestamp, entry, api_key)
+                send_message(result)
+            elif message.get('action') == 'search_github':
+                # Search GitHub for issues/commits related to a query
+                query = message.get('query')
+                github_token = message.get('githubToken')
+                repos = message.get('githubRepos')
+                max_results = message.get('maxResults', 10)
+
+                result = search_github(query, github_token, repos, max_results)
                 send_message(result)
             else:
                 send_message({'success': False, 'error': 'Unknown action'})

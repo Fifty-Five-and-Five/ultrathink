@@ -12,6 +12,9 @@ import os
 import re
 import webbrowser
 import mimetypes
+import urllib.request
+import urllib.error
+import urllib.parse
 from pathlib import Path
 from urllib.parse import urlparse, unquote
 
@@ -19,9 +22,16 @@ PORT = 8080
 PROJECT_FOLDER = Path(__file__).parent
 
 # Regex patterns for parsing kb.md
+# NEW format: - `type` | `source` | `timestamp` | Title
+# Or with URL: - `type` | `source` | `timestamp` | [Title](URL)
+NEW_ENTRY_PATTERN = re.compile(
+    r'^- `([^`]+)` \| `([^`]+)` \| `([^`]+)` \| (?:\[([^\]]+)\]\(([^)]+)\)|(.+))$'
+)
+
+# OLD format (for backwards compatibility):
 # Matches: - **[Title](URL)** - `type` - `timestamp`
 # Or: - **Title** - `type` - `timestamp`
-ENTRY_PATTERN = re.compile(
+OLD_ENTRY_PATTERN = re.compile(
     r'^- \*\*(?:\[([^\]]+)\]\(([^)]+)\)|([^*]+))\*\* - `([^`]+)` - `([^`]+)`(?: - `group: ([^`]+)`)?$'
 )
 
@@ -34,55 +44,187 @@ SCREENSHOT_PATTERN = re.compile(r'!\[Screenshot\]\(([^)]+)\)')
 # File attachment pattern
 FILE_PATTERN = re.compile(r'\[.+\]\(([^)]+)\)')
 
+# Notes pattern (for new format)
+NOTES_PATTERN = re.compile(r'^  - Notes: (.+)$')
+
+# AI metadata patterns
+ENTITY_PATTERN = re.compile(r'^  - Entity: (.+)$')
+TOPICS_PATTERN = re.compile(r'^  - Topics: (.+)$')
+PEOPLE_PATTERN = re.compile(r'^  - People: (.+)$')
+
+# Page metadata patterns
+DESCRIPTION_PATTERN = re.compile(r'^  - Description: (.+)$')
+IMAGE_PATTERN = re.compile(r'^  - Image: (.+)$')
+AUTHOR_PATTERN = re.compile(r'^  - Author: (.+)$')
+PUBLISHED_PATTERN = re.compile(r'^  - Published: (.+)$')
+READTIME_PATTERN = re.compile(r'^  - ReadTime: (\d+) min$')
+
+# Task status pattern
+TASKSTATUS_PATTERN = re.compile(r'^  - Status: (.+)$')
+
 
 def parse_kb_markdown(content):
-    """Parse kb.md content into list of entry objects."""
+    """Parse kb.md content into list of entry objects.
+
+    Supports both new format: - `type` | `source` | `timestamp` | Title
+    And old format: - **[Title](URL)** - `type` - `timestamp`
+    """
     entries = []
     lines = content.split('\n')
     current_entry = None
 
     for line in lines:
-        # Try to match main entry line
-        match = ENTRY_PATTERN.match(line)
-        if match:
+        # Try NEW format first: - `type` | `source` | `timestamp` | Title
+        new_match = NEW_ENTRY_PATTERN.match(line)
+        if new_match:
             # Save previous entry
             if current_entry:
                 entries.append(current_entry)
 
             # Extract fields from regex groups
-            title_linked = match.group(1)
-            url = match.group(2)
-            title_plain = match.group(3)
-            entry_type = match.group(4)
-            timestamp = match.group(5)
-            group = match.group(6)
+            entry_type = new_match.group(1)
+            source = new_match.group(2)
+            timestamp = new_match.group(3)
+            title_linked = new_match.group(4)  # Title if linked
+            url = new_match.group(5)           # URL if linked
+            title_plain = new_match.group(6)   # Title if not linked
 
             current_entry = {
                 'title': (title_linked or title_plain or '').strip(),
                 'url': url or '',
                 'type': entry_type,
+                'source': source,
+                'timestamp': timestamp,
+                'group': '',
+                'content': '',
+                'selectedText': '',  # Blockquoted text (snippets)
+                'screenshot': '',
+                'file': '',
+                'entity': '',
+                'topics': [],
+                'people': [],
+                # Page metadata (optional)
+                'description': '',
+                'ogImage': '',
+                'author': '',
+                'publishedDate': '',
+                'readingTime': 0,
+                'aiSummary': '',
+                'taskStatus': ''  # For kanban board (not-started, in-progress, done, or custom)
+            }
+            continue
+
+        # Try OLD format: - **[Title](URL)** - `type` - `timestamp`
+        old_match = OLD_ENTRY_PATTERN.match(line)
+        if old_match:
+            # Save previous entry
+            if current_entry:
+                entries.append(current_entry)
+
+            # Extract fields from regex groups
+            title_linked = old_match.group(1)
+            url = old_match.group(2)
+            title_plain = old_match.group(3)
+            entry_type = old_match.group(4)
+            timestamp = old_match.group(5)
+            group = old_match.group(6)
+
+            current_entry = {
+                'title': (title_linked or title_plain or '').strip(),
+                'url': url or '',
+                'type': entry_type,
+                'source': 'browser',  # Default for old format
                 'timestamp': timestamp,
                 'group': group.split('(')[0].strip() if group else '',
                 'content': '',
+                'selectedText': '',  # Blockquoted text (snippets)
                 'screenshot': '',
-                'file': ''
+                'file': '',
+                'entity': '',
+                'topics': [],
+                'people': [],
+                # Page metadata (optional)
+                'description': '',
+                'ogImage': '',
+                'author': '',
+                'publishedDate': '',
+                'readingTime': 0,
+                'aiSummary': '',
+                'taskStatus': ''  # For kanban board
             }
+            continue
 
-        # Match content lines
-        elif current_entry:
+        # Match content lines (indented with "  - ")
+        if current_entry:
             content_match = CONTENT_PATTERN.match(line)
-            if content_match:
-                content_line = content_match.group(1)
+            # Also check for continuation lines (indented with 4 spaces, no "- ")
+            continuation_match = re.match(r'^    ([^-].*)$', line)
 
+            if continuation_match and current_entry.get('_in_notes'):
+                # Continuation of multi-line notes
+                cont_line = continuation_match.group(1).strip()
+                if cont_line and not cont_line.startswith('_('):  # Skip truncation markers
+                    current_entry['content'] += '\n' + cont_line
+            elif content_match:
+                content_line = content_match.group(1)
+                current_entry['_in_notes'] = False  # Reset multi-line flag
+
+                # Check for Notes: prefix (new format)
+                if content_line.startswith('Notes: '):
+                    current_entry['content'] = content_line[7:]  # Remove "Notes: " prefix
+                    current_entry['_in_notes'] = True  # May have continuation lines
+                # Check for Entity: metadata
+                elif content_line.startswith('Entity: '):
+                    current_entry['entity'] = content_line[8:]  # Remove "Entity: " prefix
+                # Check for Topics: metadata
+                elif content_line.startswith('Topics: '):
+                    topics_str = content_line[8:]  # Remove "Topics: " prefix
+                    current_entry['topics'] = [t.strip() for t in topics_str.split(',')]
+                # Check for People: metadata
+                elif content_line.startswith('People: '):
+                    people_str = content_line[8:]  # Remove "People: " prefix
+                    current_entry['people'] = [p.strip() for p in people_str.split(',')]
+                # Check for page metadata fields
+                elif content_line.startswith('Description: '):
+                    current_entry['description'] = content_line[13:]
+                elif content_line.startswith('Image: '):
+                    current_entry['ogImage'] = content_line[7:]
+                elif content_line.startswith('Author: '):
+                    current_entry['author'] = content_line[8:]
+                elif content_line.startswith('Published: '):
+                    current_entry['publishedDate'] = content_line[11:]
+                elif content_line.startswith('ReadTime: '):
+                    # Parse "X min" format
+                    rt_match = re.match(r'(\d+) min', content_line[10:])
+                    if rt_match:
+                        current_entry['readingTime'] = int(rt_match.group(1))
+                # Check for AI Summary
+                elif content_line.startswith('AI Summary: '):
+                    current_entry['aiSummary'] = content_line[12:]
+                # Check for Status (task kanban status)
+                elif content_line.startswith('Status: '):
+                    current_entry['taskStatus'] = content_line[8:]
                 # Check for screenshot
-                screenshot_match = SCREENSHOT_PATTERN.match(content_line)
-                if screenshot_match:
+                elif SCREENSHOT_PATTERN.match(content_line):
+                    screenshot_match = SCREENSHOT_PATTERN.match(content_line)
                     current_entry['screenshot'] = screenshot_match.group(1)
                 # Check for file attachment
-                elif content_line.startswith('['):
-                    file_match = FILE_PATTERN.match(content_line)
+                elif content_line.startswith('[') or content_line.startswith('!['):
+                    file_match = FILE_PATTERN.search(content_line)
                     if file_match:
                         current_entry['file'] = file_match.group(1)
+                # Check for blockquote content (snippet selected text with >)
+                elif content_line.startswith('> '):
+                    text = content_line[2:]  # Remove "> " prefix
+                    if current_entry['selectedText']:
+                        current_entry['selectedText'] += '\n'
+                    current_entry['selectedText'] += text
+                # Check for bold content (long-note format with **)
+                elif content_line.startswith('**'):
+                    text = content_line.strip('*').strip()
+                    if current_entry['content']:
+                        current_entry['content'] += '\n'
+                    current_entry['content'] += text
                 # Regular content
                 else:
                     if current_entry['content']:
@@ -112,8 +254,8 @@ def delete_entry(timestamp):
     files_to_delete = []
 
     for i, line in enumerate(lines):
-        # Check if this is a new entry
-        if line.startswith('- **'):
+        # Check if this is a new entry (new format starts with "- `", old format with "- **")
+        if line.startswith('- `') or line.startswith('- **'):
             skip_until_next_entry = False
 
             # Check if this entry has the timestamp we want to delete
@@ -160,6 +302,171 @@ def delete_entry(timestamp):
         return {'success': False, 'error': f'Entry with timestamp {timestamp} not found'}
 
 
+def update_entry_status(timestamp, status):
+    """Update task status for entry with matching timestamp in kb.md."""
+    kb_file = PROJECT_FOLDER / 'kb.md'
+    if not kb_file.exists():
+        return {'success': False, 'error': 'kb.md not found'}
+
+    with open(kb_file, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+
+    new_lines = []
+    found_entry = False
+    in_target_entry = False
+    status_updated = False
+    entry_content_lines = []
+
+    for i, line in enumerate(lines):
+        # Check if this is a new entry
+        if line.startswith('- `') or line.startswith('- **'):
+            # If we were in target entry but didn't update status, add it now
+            if in_target_entry and not status_updated:
+                # Add status line before the entry ends
+                new_lines.extend(entry_content_lines)
+                new_lines.append(f'  - Status: {status}\n')
+                status_updated = True
+                entry_content_lines = []
+
+            in_target_entry = False
+
+            # Check if this entry has the timestamp we want
+            if f'`{timestamp}`' in line:
+                found_entry = True
+                in_target_entry = True
+                new_lines.append(line)
+                continue
+
+        if in_target_entry:
+            # Check if this is a content line (starts with "  - ")
+            if line.startswith('  - '):
+                # Check if this is the status line
+                if line.startswith('  - Status: '):
+                    # Replace existing status
+                    new_lines.append(f'  - Status: {status}\n')
+                    status_updated = True
+                else:
+                    entry_content_lines.append(line)
+            elif line.strip() == '' or line.startswith('- `') or line.startswith('- **'):
+                # Entry ended - add status if not updated
+                if not status_updated:
+                    new_lines.extend(entry_content_lines)
+                    new_lines.append(f'  - Status: {status}\n')
+                    status_updated = True
+                    entry_content_lines = []
+                new_lines.append(line)
+                in_target_entry = False
+            else:
+                entry_content_lines.append(line)
+        else:
+            new_lines.append(line)
+
+    # Handle case where target entry is at end of file
+    if in_target_entry and not status_updated:
+        new_lines.extend(entry_content_lines)
+        new_lines.append(f'  - Status: {status}\n')
+        status_updated = True
+
+    if found_entry:
+        with open(kb_file, 'w', encoding='utf-8') as f:
+            f.writelines(new_lines)
+        return {'success': True}
+    else:
+        return {'success': False, 'error': f'Entry with timestamp {timestamp} not found'}
+
+
+def search_github(query, github_token, repos=None, max_results=10):
+    """
+    Search GitHub for issues and commits related to a query.
+
+    Args:
+        query: Search query string
+        github_token: GitHub Personal Access Token
+        repos: Comma-separated list of repos (e.g., "owner/repo1, owner/repo2")
+        max_results: Maximum results per search type
+
+    Returns:
+        dict with success, issues, commits, and optional error
+    """
+    if not github_token:
+        return {'success': False, 'error': 'GitHub token not configured'}
+
+    if not query or not query.strip():
+        return {'success': False, 'error': 'Search query is empty'}
+
+    results = {
+        'success': True,
+        'issues': [],
+        'commits': [],
+        'query': query
+    }
+
+    headers = {
+        'Authorization': f'Bearer {github_token}',
+        'Accept': 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'UltraThink-KB-Server'
+    }
+
+    # Build query with optional repo filter
+    base_query = query.strip()
+    if repos:
+        repo_list = [r.strip() for r in repos.split(',') if r.strip()]
+        if repo_list:
+            repo_filter = ' '.join([f'repo:{r}' for r in repo_list])
+            base_query = f'{base_query} {repo_filter}'
+
+    # Search issues
+    try:
+        issues_url = f'https://api.github.com/search/issues?q={urllib.parse.quote(base_query)}&per_page={max_results}&sort=updated'
+        req = urllib.request.Request(issues_url, headers=headers)
+
+        with urllib.request.urlopen(req, timeout=30) as response:
+            issues_data = json.loads(response.read().decode('utf-8'))
+
+        for item in issues_data.get('items', [])[:max_results]:
+            results['issues'].append({
+                'number': item.get('number'),
+                'title': item.get('title'),
+                'state': item.get('state'),
+                'url': item.get('html_url'),
+                'repo': item.get('repository_url', '').split('/')[-1] if item.get('repository_url') else '',
+                'labels': [l.get('name') for l in item.get('labels', [])],
+                'created_at': item.get('created_at'),
+                'updated_at': item.get('updated_at'),
+                'body_preview': (item.get('body') or '')[:200]
+            })
+    except urllib.error.HTTPError as e:
+        print(f'GitHub issues search error: {e.code} {e.reason}')
+    except Exception as e:
+        print(f'GitHub issues search error: {e}')
+
+    # Search commits
+    try:
+        commits_url = f'https://api.github.com/search/commits?q={urllib.parse.quote(base_query)}&per_page={max_results}&sort=committer-date'
+        req = urllib.request.Request(commits_url, headers=headers)
+
+        with urllib.request.urlopen(req, timeout=30) as response:
+            commits_data = json.loads(response.read().decode('utf-8'))
+
+        for item in commits_data.get('items', [])[:max_results]:
+            commit = item.get('commit', {})
+            results['commits'].append({
+                'sha': item.get('sha', '')[:7],
+                'message': commit.get('message', '').split('\n')[0][:100],
+                'url': item.get('html_url'),
+                'repo': item.get('repository', {}).get('full_name', ''),
+                'author': commit.get('author', {}).get('name', ''),
+                'date': commit.get('committer', {}).get('date', '')
+            })
+    except urllib.error.HTTPError as e:
+        print(f'GitHub commits search error: {e.code} {e.reason}')
+    except Exception as e:
+        print(f'GitHub commits search error: {e}')
+
+    return results
+
+
 class KBHandler(http.server.BaseHTTPRequestHandler):
     """Custom HTTP handler for KB API and static file serving."""
 
@@ -170,7 +477,7 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
         self.send_header('Content-Type', 'application/json')
         self.send_header('Content-Length', len(content))
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, DELETE, OPTIONS')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
         self.wfile.write(content)
@@ -199,7 +506,7 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
         """Handle CORS preflight requests."""
         self.send_response(200)
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, DELETE, OPTIONS')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
 
@@ -221,6 +528,60 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
             entries = parse_kb_markdown(content)
             self.send_json(entries)
 
+        elif path == '/api/topics':
+            # Return all topics from topics.json
+            topics_file = PROJECT_FOLDER / 'topics.json'
+            if topics_file.exists():
+                with open(topics_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                self.send_json(data.get('topics', []))
+            else:
+                self.send_json([])
+
+        elif path == '/api/entities':
+            # Return all entities (people & roles) from entities.json
+            entities_file = PROJECT_FOLDER / 'entities.json'
+            if entities_file.exists():
+                with open(entities_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                self.send_json(data.get('entities', []))
+            else:
+                self.send_json([])
+
+        elif path == '/api/kanban-columns':
+            # Return kanban columns from kanban-columns.json
+            # Default columns if file doesn't exist
+            default_columns = [
+                {'id': 'not-started', 'name': 'Not started', 'color': '#6b7280'},
+                {'id': 'in-progress', 'name': 'In progress', 'color': '#3b82f6'},
+                {'id': 'done', 'name': 'Done', 'color': '#22c55e'}
+            ]
+            columns_file = PROJECT_FOLDER / 'kanban-columns.json'
+            if columns_file.exists():
+                with open(columns_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                self.send_json(data.get('columns', default_columns))
+            else:
+                self.send_json(default_columns)
+
+        elif path.startswith('/api/entries/'):
+            # Return single entry by timestamp
+            timestamp = unquote(path.split('/api/entries/')[1])
+            kb_file = PROJECT_FOLDER / 'kb.md'
+            if not kb_file.exists():
+                self.send_json({'error': 'kb.md not found'}, 404)
+                return
+
+            with open(kb_file, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            entries = parse_kb_markdown(content)
+            entry = next((e for e in entries if e['timestamp'] == timestamp), None)
+            if entry:
+                self.send_json(entry)
+            else:
+                self.send_json({'error': 'Entry not found'}, 404)
+
         elif path == '/' or path == '/kb-viewer.html':
             # Serve main HTML page
             self.send_file(PROJECT_FOLDER / 'kb-viewer.html')
@@ -237,24 +598,328 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
             # Serve uploaded files
             self.send_file(PROJECT_FOLDER / path[1:])
 
+        elif path.startswith('/ultrathink-extension/'):
+            # Serve extension assets (icons)
+            self.send_file(PROJECT_FOLDER / path[1:])
+
+        else:
+            self.send_error(404, 'Not found')
+
+    def do_POST(self):
+        """Handle POST requests (create)."""
+        parsed = urlparse(self.path)
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(content_length))
+        except Exception as e:
+            self.send_json({'success': False, 'error': f'Invalid JSON: {str(e)}'}, 400)
+            return
+
+        if parsed.path == '/api/topics':
+            name = body.get('name', '').strip()
+            if not name:
+                self.send_json({'success': False, 'error': 'Name required'}, 400)
+                return
+
+            topics_file = PROJECT_FOLDER / 'topics.json'
+            topics = []
+            if topics_file.exists():
+                with open(topics_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    topics = data.get('topics', [])
+
+            if name in topics:
+                self.send_json({'success': False, 'error': 'Topic already exists'}, 400)
+                return
+
+            topics.append(name)
+            topics.sort()
+            with open(topics_file, 'w', encoding='utf-8') as f:
+                json.dump({'topics': topics}, f, indent=2)
+            self.send_json({'success': True})
+
+        elif parsed.path == '/api/entities':
+            name = body.get('name', '').strip()
+            if not name:
+                self.send_json({'success': False, 'error': 'Name required'}, 400)
+                return
+
+            entities_file = PROJECT_FOLDER / 'entities.json'
+            entities = []
+            if entities_file.exists():
+                with open(entities_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    entities = data.get('entities', [])
+
+            if name in entities:
+                self.send_json({'success': False, 'error': 'Already exists'}, 400)
+                return
+
+            entities.append(name)
+            entities.sort()
+            with open(entities_file, 'w', encoding='utf-8') as f:
+                json.dump({'entities': entities}, f, indent=2)
+            self.send_json({'success': True})
+
+        elif parsed.path == '/api/kanban-columns':
+            # Add a new column
+            col_id = body.get('id', '').strip()
+            col_name = body.get('name', '').strip()
+            col_color = body.get('color', '#6b7280').strip()
+
+            if not col_id or not col_name:
+                self.send_json({'success': False, 'error': 'Column id and name required'}, 400)
+                return
+
+            columns_file = PROJECT_FOLDER / 'kanban-columns.json'
+            default_columns = [
+                {'id': 'not-started', 'name': 'Not started', 'color': '#6b7280'},
+                {'id': 'in-progress', 'name': 'In progress', 'color': '#3b82f6'},
+                {'id': 'done', 'name': 'Done', 'color': '#22c55e'}
+            ]
+
+            if columns_file.exists():
+                with open(columns_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    columns = data.get('columns', default_columns)
+            else:
+                columns = default_columns
+
+            # Check if column already exists
+            if any(c['id'] == col_id for c in columns):
+                self.send_json({'success': False, 'error': 'Column already exists'}, 400)
+                return
+
+            columns.append({'id': col_id, 'name': col_name, 'color': col_color})
+            with open(columns_file, 'w', encoding='utf-8') as f:
+                json.dump({'columns': columns}, f, indent=2)
+            self.send_json({'success': True})
+
+        elif parsed.path == '/api/search/github':
+            # Search GitHub for issues and commits
+            try:
+                query = body.get('query', '').strip()
+                if not query:
+                    self.send_json({'success': False, 'error': 'Query required'}, 400)
+                    return
+
+                # Load settings from native-host/settings.json
+                settings_file = PROJECT_FOLDER / 'native-host' / 'settings.json'
+                if not settings_file.exists():
+                    self.send_json({'success': False, 'error': 'Settings file not found. Configure GitHub token in native-host/settings.json'}, 400)
+                    return
+
+                with open(settings_file, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+
+                github_token = settings.get('github_token', '')
+                github_repos = settings.get('github_repos', '')
+
+                if not github_token:
+                    self.send_json({'success': False, 'error': 'GitHub token not configured. Add "github_token" to native-host/settings.json'}, 400)
+                    return
+
+                max_results = body.get('maxResults', 10)
+                result = search_github(query, github_token, github_repos, max_results)
+                self.send_json(result)
+            except Exception as e:
+                print(f'GitHub search endpoint error: {e}')
+                self.send_json({'success': False, 'error': str(e)}, 500)
+
+        else:
+            self.send_error(404, 'Not found')
+
+    def do_PUT(self):
+        """Handle PUT requests (update/rename)."""
+        parsed = urlparse(self.path)
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = json.loads(self.rfile.read(content_length))
+
+        if parsed.path == '/api/kanban-columns':
+            # Replace all columns
+            columns = body.get('columns', [])
+            if not columns:
+                self.send_json({'success': False, 'error': 'Columns required'}, 400)
+                return
+
+            columns_file = PROJECT_FOLDER / 'kanban-columns.json'
+            with open(columns_file, 'w', encoding='utf-8') as f:
+                json.dump({'columns': columns}, f, indent=2)
+            self.send_json({'success': True})
+
+        elif parsed.path == '/api/topics':
+            old_name = body.get('oldName', '').strip()
+            new_name = body.get('newName', '').strip()
+            if not old_name or not new_name:
+                self.send_json({'success': False, 'error': 'Names required'}, 400)
+                return
+
+            topics_file = PROJECT_FOLDER / 'topics.json'
+            if not topics_file.exists():
+                self.send_json({'success': False, 'error': 'Not found'}, 404)
+                return
+
+            with open(topics_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                topics = data.get('topics', [])
+
+            if old_name not in topics:
+                self.send_json({'success': False, 'error': 'Topic not found'}, 404)
+                return
+
+            topics = [new_name if t == old_name else t for t in topics]
+            topics.sort()
+            with open(topics_file, 'w', encoding='utf-8') as f:
+                json.dump({'topics': topics}, f, indent=2)
+            self.send_json({'success': True})
+
+        elif parsed.path == '/api/entities':
+            old_name = body.get('oldName', '').strip()
+            new_name = body.get('newName', '').strip()
+            if not old_name or not new_name:
+                self.send_json({'success': False, 'error': 'Names required'}, 400)
+                return
+
+            entities_file = PROJECT_FOLDER / 'entities.json'
+            if not entities_file.exists():
+                self.send_json({'success': False, 'error': 'Not found'}, 404)
+                return
+
+            with open(entities_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                entities = data.get('entities', [])
+
+            if old_name not in entities:
+                self.send_json({'success': False, 'error': 'Not found'}, 404)
+                return
+
+            entities = [new_name if e == old_name else e for e in entities]
+            entities.sort()
+            with open(entities_file, 'w', encoding='utf-8') as f:
+                json.dump({'entities': entities}, f, indent=2)
+            self.send_json({'success': True})
+
+        else:
+            self.send_error(404, 'Not found')
+
+    def do_PATCH(self):
+        """Handle PATCH requests (partial update)."""
+        parsed = urlparse(self.path)
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = json.loads(self.rfile.read(content_length)) if content_length > 0 else {}
+
+        if parsed.path == '/api/entries':
+            # Update task status
+            timestamp = body.get('timestamp')
+            task_status = body.get('taskStatus')
+
+            if not timestamp:
+                self.send_json({'success': False, 'error': 'Missing timestamp'}, 400)
+                return
+
+            if task_status is None:
+                self.send_json({'success': False, 'error': 'Missing taskStatus'}, 400)
+                return
+
+            result = update_entry_status(timestamp, task_status)
+            self.send_json(result)
+
         else:
             self.send_error(404, 'Not found')
 
     def do_DELETE(self):
         """Handle DELETE requests."""
         parsed = urlparse(self.path)
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = json.loads(self.rfile.read(content_length)) if content_length > 0 else {}
 
         if parsed.path == '/api/entries':
-            # Read request body
-            content_length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(content_length))
             timestamp = body.get('timestamp')
-
             if timestamp:
                 result = delete_entry(timestamp)
                 self.send_json(result)
             else:
                 self.send_json({'success': False, 'error': 'Missing timestamp'}, 400)
+
+        elif parsed.path == '/api/topics':
+            name = body.get('name', '').strip()
+            if not name:
+                self.send_json({'success': False, 'error': 'Name required'}, 400)
+                return
+
+            topics_file = PROJECT_FOLDER / 'topics.json'
+            if not topics_file.exists():
+                self.send_json({'success': False, 'error': 'Not found'}, 404)
+                return
+
+            with open(topics_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                topics = data.get('topics', [])
+
+            if name not in topics:
+                self.send_json({'success': False, 'error': 'Topic not found'}, 404)
+                return
+
+            topics.remove(name)
+            with open(topics_file, 'w', encoding='utf-8') as f:
+                json.dump({'topics': topics}, f, indent=2)
+            self.send_json({'success': True})
+
+        elif parsed.path == '/api/entities':
+            name = body.get('name', '').strip()
+            if not name:
+                self.send_json({'success': False, 'error': 'Name required'}, 400)
+                return
+
+            entities_file = PROJECT_FOLDER / 'entities.json'
+            if not entities_file.exists():
+                self.send_json({'success': False, 'error': 'Not found'}, 404)
+                return
+
+            with open(entities_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                entities = data.get('entities', [])
+
+            if name not in entities:
+                self.send_json({'success': False, 'error': 'Not found'}, 404)
+                return
+
+            entities.remove(name)
+            with open(entities_file, 'w', encoding='utf-8') as f:
+                json.dump({'entities': entities}, f, indent=2)
+            self.send_json({'success': True})
+
+        elif parsed.path == '/api/kanban-columns':
+            col_id = body.get('id', '').strip()
+            if not col_id:
+                self.send_json({'success': False, 'error': 'Column id required'}, 400)
+                return
+
+            # Don't allow deleting default columns
+            if col_id in ['not-started', 'in-progress', 'done']:
+                self.send_json({'success': False, 'error': 'Cannot delete default columns'}, 400)
+                return
+
+            columns_file = PROJECT_FOLDER / 'kanban-columns.json'
+            if not columns_file.exists():
+                self.send_json({'success': False, 'error': 'Not found'}, 404)
+                return
+
+            with open(columns_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                columns = data.get('columns', [])
+
+            original_len = len(columns)
+            columns = [c for c in columns if c['id'] != col_id]
+
+            if len(columns) == original_len:
+                self.send_json({'success': False, 'error': 'Column not found'}, 404)
+                return
+
+            with open(columns_file, 'w', encoding='utf-8') as f:
+                json.dump({'columns': columns}, f, indent=2)
+            self.send_json({'success': True})
+
         else:
             self.send_error(404, 'Not found')
 

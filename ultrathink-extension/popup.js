@@ -1,9 +1,37 @@
+/**
+ * @fileoverview UltraThink popup UI controller.
+ * Handles the extension popup window that appears when clicking the extension icon.
+ * Features include auto-save timer, type detection, screenshot handling, and bulk tab saving.
+ * @module popup
+ */
+
 // Initialize logger
 initLogger();
 const pinLog = createLogger('Pin');
 const popupLog = createLogger('Popup');
 
-// Global state
+/**
+ * Popup state container - encapsulates all mutable state for the popup UI.
+ * @namespace PopupState
+ */
+const PopupState = {
+  /** @type {number} Auto-save countdown in seconds */
+  countdown: 3,
+  /** @type {number|null} Interval ID for the countdown timer */
+  timerInterval: null,
+  /** @type {chrome.tabs.Tab|null} Currently active tab */
+  currentTab: null,
+  /** @type {string} Text selected on the page (for snippets) */
+  selectedText: '',
+  /** @type {boolean} Whether auto-save has already triggered */
+  autoSaveTriggered: false,
+  /** @type {Object|null} Screenshot data if capturing a screenshot */
+  screenshotData: null,
+  /** @type {Array<chrome.tabs.Tab>} All tabs in current window (for bulk save) */
+  allTabs: []
+};
+
+// Legacy variable aliases for backwards compatibility
 let countdown = 3;
 let timerInterval = null;
 let currentTab = null;
@@ -12,7 +40,17 @@ let autoSaveTriggered = false;
 let screenshotData = null;
 let allTabs = [];
 
-// Detect type from URL
+/**
+ * Detects the content type based on URL patterns.
+ * Identifies AI tools (Claude, ChatGPT, Perplexity), documents, and media.
+ *
+ * @function detectUrlType
+ * @param {string} url - The URL to analyse
+ * @returns {string} Content type identifier (e.g., 'claude', 'pdf', 'video', 'link')
+ * @example
+ * detectUrlType('https://claude.ai/chat/123'); // 'claude'
+ * detectUrlType('https://example.com/doc.pdf'); // 'pdf'
+ */
 function detectUrlType(url) {
   if (!url) return 'link';
 
@@ -50,7 +88,17 @@ function detectUrlType(url) {
   return 'link';
 }
 
-// Detect type from filename (for dropped files)
+/**
+ * Detects the content type from a filename extension.
+ * Used for dropped/uploaded files.
+ *
+ * @function detectFileType
+ * @param {string} filename - The filename to analyse
+ * @returns {string} Content type identifier (e.g., 'pdf', 'audio', 'image', 'file')
+ * @example
+ * detectFileType('document.pdf'); // 'pdf'
+ * detectFileType('song.mp3'); // 'audio'
+ */
 function detectFileType(filename) {
   if (!filename) return 'file';
 
@@ -196,6 +244,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 });
 
+/**
+ * Handles toggling the "save all tabs" checkbox.
+ * Disables type/notes fields and updates preview when bulk saving.
+ *
+ * @function handleAllTabsToggle
+ */
 function handleAllTabsToggle() {
   const checkbox = document.getElementById('allTabsCheckbox');
   const typeSelect = document.getElementById('type');
@@ -219,6 +273,12 @@ function handleAllTabsToggle() {
   }
 }
 
+/**
+ * Starts the auto-save countdown timer.
+ * Displays countdown in UI and triggers save when it reaches 0.
+ *
+ * @function startTimer
+ */
 function startTimer() {
   const timerEl = document.getElementById('timer');
   timerEl.textContent = `Auto-saving in ${countdown} seconds...`;
@@ -236,6 +296,12 @@ function startTimer() {
   }, 1000);
 }
 
+/**
+ * Resets the auto-save timer back to initial countdown.
+ * Called when user interacts with form fields.
+ *
+ * @function resetTimer
+ */
 function resetTimer() {
   if (!autoSaveTriggered) {
     clearInterval(timerInterval);
@@ -244,6 +310,14 @@ function resetTimer() {
   }
 }
 
+/**
+ * Saves the current entry to the knowledge base via the native host.
+ * Handles both single tab and bulk (all tabs) saving.
+ *
+ * @async
+ * @function saveEntry
+ * @returns {Promise<void>}
+ */
 async function saveEntry() {
   const timerEl = document.getElementById('timer');
   const statusEl = document.getElementById('status');

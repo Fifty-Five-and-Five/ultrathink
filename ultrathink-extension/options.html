@@ -177,6 +177,27 @@
     </div>
   </div>
 
+  <h2 style="font-size: 18px; margin-top: 32px; margin-bottom: 16px; color: #333; border-top: 1px solid #ddd; padding-top: 24px;">External Integrations</h2>
+
+  <div class="field">
+    <label for="githubToken">GitHub Personal Access Token:</label>
+    <input type="password" id="githubToken" placeholder="ghp_...">
+    <div class="help-text">
+      Used to search your GitHub repos for related issues/commits. Create a token at
+      <a href="https://github.com/settings/tokens?type=beta" target="_blank">GitHub Settings</a>
+      with read access to your repositories.
+    </div>
+  </div>
+
+  <div class="field">
+    <label for="githubRepos">GitHub Repositories to Search:</label>
+    <input type="text" id="githubRepos" placeholder="owner/repo1, owner/repo2">
+    <div class="help-text">
+      Comma-separated list of repositories to search. Leave empty to search all accessible repos.
+    </div>
+    <div class="example">Example: anthropics/claude-code, myuser/my-project</div>
+  </div>
+
   <button id="saveBtn">Save</button>
 
   <div class="shortcuts-section">
