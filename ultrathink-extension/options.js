@@ -1,4 +1,21 @@
-// DEFAULT_SETTINGS imported from shared-constants.js
+// DEFAULT_SETTINGS, DEFAULT_CLASSIFICATION_PROMPT, DEFAULT_GRAMMAR_PROMPT imported from shared-constants.js
+
+// Toggle collapsible sections
+function toggleCollapsible(id) {
+  const content = document.getElementById(id + 'Content');
+  const arrow = document.getElementById(id + 'Arrow');
+
+  if (content.classList.contains('open')) {
+    content.classList.remove('open');
+    arrow.textContent = '▶';
+  } else {
+    content.classList.add('open');
+    arrow.textContent = '▼';
+  }
+}
+
+// Make toggleCollapsible globally accessible for onclick handlers
+window.toggleCollapsible = toggleCollapsible;
 
 // Input validation functions
 function validateProjectFolder(path) {
@@ -81,6 +98,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('githubToken').value = settings.githubToken || '';
   document.getElementById('githubRepos').value = settings.githubRepos || '';
 
+  // Load AI prompts (use saved value or default)
+  document.getElementById('classificationPrompt').value =
+    settings.classificationPrompt || DEFAULT_CLASSIFICATION_PROMPT;
+  document.getElementById('grammarPrompt').value =
+    settings.grammarPrompt || DEFAULT_GRAMMAR_PROMPT;
+
   // Setup save button
   document.getElementById('saveBtn').addEventListener('click', saveSettings);
 
@@ -106,6 +129,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('shortcutsBtn').addEventListener('click', () => {
     chrome.tabs.create({ url: 'chrome://extensions/shortcuts' });
   });
+
+  // Setup reset prompt buttons
+  document.getElementById('resetClassificationPrompt').addEventListener('click', () => {
+    document.getElementById('classificationPrompt').value = DEFAULT_CLASSIFICATION_PROMPT;
+  });
+
+  document.getElementById('resetGrammarPrompt').addEventListener('click', () => {
+    document.getElementById('grammarPrompt').value = DEFAULT_GRAMMAR_PROMPT;
+  });
 });
 
 async function saveSettings() {
@@ -114,6 +146,8 @@ async function saveSettings() {
   const debugMode = document.getElementById('debugMode').checked;
   const githubToken = document.getElementById('githubToken').value.trim();
   const githubRepos = document.getElementById('githubRepos').value.trim();
+  const classificationPrompt = document.getElementById('classificationPrompt').value.trim();
+  const grammarPrompt = document.getElementById('grammarPrompt').value.trim();
   const statusEl = document.getElementById('status');
 
   // Validate project folder
@@ -151,12 +185,18 @@ async function saveSettings() {
   }
 
   // Save to storage
+  // For prompts: save empty string if user hasn't modified from default (saves storage)
+  const saveClassificationPrompt = (classificationPrompt === DEFAULT_CLASSIFICATION_PROMPT) ? '' : classificationPrompt;
+  const saveGrammarPrompt = (grammarPrompt === DEFAULT_GRAMMAR_PROMPT) ? '' : grammarPrompt;
+
   await chrome.storage.sync.set({
     projectFolder: normalizedPath,
     openaiKey: openaiKey,
     debugMode: debugMode,
     githubToken: githubToken,
-    githubRepos: githubRepos
+    githubRepos: githubRepos,
+    classificationPrompt: saveClassificationPrompt,
+    grammarPrompt: saveGrammarPrompt
   });
 
   // Show success message

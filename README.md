@@ -87,7 +87,7 @@ A powerful Microsoft Edge extension that captures URLs, text snippets, screensho
 ```
 ultrathink/
 ├── ultrathink-extension/       # Browser extension
-│   ├── manifest.json            # Extension configuration (v2.1.0)
+│   ├── manifest.json            # Extension configuration (v2.2.0)
 │   ├── popup.html/js            # Main popup interface
 │   ├── background.js            # Service worker, native messaging
 │   ├── selection-overlay.js     # Screenshot area selection
@@ -346,7 +346,16 @@ Each entry in `kb.md` looks like this:
 
 ## Version History
 
-- **v2.1.0** (Current)
+- **v2.2.0** (Current)
+  - Customisable AI prompts: Edit classification and grammar prompts in extension settings
+  - Collapsible prompt sections with placeholder tags ({title}, {content}, etc.)
+  - Reset to default buttons for prompt customisation
+  - Multi-monitor widget support: Click monitor icon to show widget on all screens
+  - Mirror widgets on secondary monitors forward drops to main widget
+  - Real-time API logs page in kb-viewer for debugging external calls
+  - Logs show timestamp, service, status, duration, request/response data
+
+- **v2.1.0**
   - GitHub integration: Search issues and commits from your GitHub repos
   - New Search page in viewer for external service search
   - Kanban improvements: Click-to-rename columns, color picker on double-click

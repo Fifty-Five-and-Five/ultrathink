@@ -1800,6 +1800,21 @@
             color: #7c3aed;
         }
 
+        .search-result-lang {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .search-result-path {
+            font-family: monospace;
+            font-size: 12px;
+            color: #6b7280;
+        }
+
         .search-error {
             padding: 20px;
             text-align: center;
@@ -1817,6 +1832,115 @@
         }
 
         #searchPage.active {
+            display: block;
+        }
+
+        /* Logs Page Styles */
+        .logs-controls {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .logs-auto-refresh {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 14px;
+            color: #6b7280;
+            cursor: pointer;
+        }
+
+        .logs-auto-refresh input {
+            cursor: pointer;
+        }
+
+        .logs-container {
+            font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+            font-size: 12px;
+            max-height: calc(100vh - 200px);
+            overflow-y: auto;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            background: #fff;
+        }
+
+        .log-entry {
+            padding: 10px 12px;
+            border-bottom: 1px solid #f3f4f6;
+            display: grid;
+            grid-template-columns: 140px 70px 120px 1fr;
+            gap: 12px;
+            align-items: start;
+        }
+
+        .log-entry:last-child {
+            border-bottom: none;
+        }
+
+        .log-entry:hover {
+            background: #f9fafb;
+        }
+
+        .log-entry.error {
+            background: #fef2f2;
+        }
+
+        .log-entry.error:hover {
+            background: #fee2e2;
+        }
+
+        .log-timestamp {
+            color: #6b7280;
+            font-size: 11px;
+        }
+
+        .log-service {
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 11px;
+        }
+
+        .log-service.github { color: #333; }
+        .log-service.openai { color: #10a37f; }
+        .log-service.notion { color: #000; }
+
+        .log-status {
+            font-size: 11px;
+        }
+
+        .log-status.success { color: #22c55e; }
+        .log-status.error { color: #ef4444; }
+
+        .log-details-wrapper {
+            min-width: 0;
+        }
+
+        .log-message {
+            color: #374151;
+            word-break: break-word;
+        }
+
+        .log-details {
+            margin-top: 6px;
+            padding: 8px;
+            background: #f3f4f6;
+            border-radius: 4px;
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 150px;
+            overflow-y: auto;
+            font-size: 11px;
+            color: #6b7280;
+        }
+
+        .logs-empty {
+            padding: 60px 20px;
+            text-align: center;
+            color: #9ca3af;
+        }
+
+        #logsPage.active {
             display: block;
         }
     </style>
@@ -1883,6 +2007,16 @@
                             <path d="M117.25,157.92a60,60,0,1,0-66.5,0A95.83,95.83,0,0,0,3.53,195.63a8,8,0,1,0,13.4,8.74,80,80,0,0,1,134.14,0,8,8,0,0,0,13.4-8.74A95.83,95.83,0,0,0,117.25,157.92ZM40,108a44,44,0,1,1,44,44A44.05,44.05,0,0,1,40,108Zm210.14,98.7a8,8,0,0,1-11.07-2.33A79.83,79.83,0,0,0,172,168a8,8,0,0,1,0-16,44,44,0,1,0-16.34-84.87,8,8,0,1,1-5.94-14.85,60,60,0,0,1,55.53,105.64,95.83,95.83,0,0,1,47.22,37.71A8,8,0,0,1,250.14,206.7Z"/>
                         </svg>
                         <span>People</span>
+                    </a>
+                    <div class="nav-divider"></div>
+                    <a class="nav-item" data-page="logs">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                            <polyline points="14 2 14 8 20 8"></polyline>
+                            <line x1="16" y1="13" x2="8" y2="13"></line>
+                            <line x1="16" y1="17" x2="8" y2="17"></line>
+                        </svg>
+                        <span>Logs</span>
                     </a>
                 </nav>
             </aside>
@@ -2041,6 +2175,21 @@
                             <p>Enter a search query to find related content across your connected services.</p>
                         </div>
                     </div>
+                </div>
+
+                <!-- Logs Page -->
+                <div class="management-page" id="logsPage">
+                    <div class="management-header">
+                        <h2>API Logs</h2>
+                        <div class="logs-controls">
+                            <label class="logs-auto-refresh">
+                                <input type="checkbox" id="logsAutoRefresh" checked>
+                                Auto-refresh
+                            </label>
+                            <button class="btn btn-secondary" id="logsClear">Clear</button>
+                        </div>
+                    </div>
+                    <div id="logsContainer" class="logs-container"></div>
                 </div>
             </main>
         </div>

@@ -25,8 +25,63 @@ const DEFAULT_SETTINGS = {
   debugMode: false,
   // External service integrations
   githubToken: '',
-  githubRepos: ''  // Comma-separated list of repos to search (e.g., "owner/repo1, owner/repo2")
+  githubRepos: '',  // Comma-separated list of repos to search (e.g., "owner/repo1, owner/repo2")
+  // AI prompts (customisable)
+  classificationPrompt: '',  // Empty means use default
+  grammarPrompt: ''  // Empty means use default
 };
+
+/**
+ * Default AI prompt for entry classification.
+ * Used when classificationPrompt setting is empty.
+ * Placeholders: {title}, {url}, {content}, {existing_topics}, {existing_people}
+ */
+const DEFAULT_CLASSIFICATION_PROMPT = `Analyze this knowledge base entry and classify it as "project", "task", or "knowledge".
+
+Title: {title}
+URL: {url}
+Content: {content}
+
+ENTITY CLASSIFICATION (in priority order):
+- "project" = References a bigger initiative, project idea, feature request, or something to build. If you see the word "project" it is a project. A video or image on its own is rarely going to be a project unless associated text indicates.
+- "task" = Action item, reminder, todo, something that needs to be done. If you see the word "task" it is a task. Unless you already decided it's a project.
+- "knowledge" = Fact, reference, documentation, information to remember. Unless already decided it's a project or task.
+- "unclassified" = Cannot determine from the content.
+
+TOPIC EXTRACTION:
+Extract 1-5 topic tags. STRONGLY prefer existing topics: {existing_topics}
+- If a topic is similar to an existing one (e.g. "React" vs "ReactJS", "ML" vs "Machine Learning"), use the EXISTING one
+- Only create a new topic if nothing similar exists
+
+PEOPLE EXTRACTION:
+Extract any people names mentioned.
+STRONGLY prefer existing people: {existing_people}
+- If a name matches an existing person's first name, use the FULL existing name (e.g. "Kevin" -> "Kevin Smith")
+- If a name has a typo but is similar to existing (e.g. "Jon" vs "John"), use the EXISTING correct spelling
+- Only add new people if no similar match exists
+
+Return JSON only:
+{
+  "entity": "project|task|knowledge|unclassified",
+  "topics": ["topic1", "topic2"],
+  "people": ["Kevin Smith", "Jane Doe"]
+}`;
+
+/**
+ * Default AI prompt for grammar correction.
+ * Used when grammarPrompt setting is empty.
+ * Placeholders: {text}, {domain}, {title}, {type}
+ */
+const DEFAULT_GRAMMAR_PROMPT = `Fix spelling and grammar errors in this note. Use UK spelling and sentence case. Never use em dash. If you can improve wording and flow without losing meaning do that. If you cannot work out meaning then don't make major changes.
+Context: From {domain}
+Page: {title}
+Type: {type}
+Preserve technical terms, jargon, domain-specific language, brands, names of things, people etc. and capitalise them correctly.
+
+Original text: "{text}"
+
+Return JSON only:
+{"corrected": "the corrected text here"}`;
 
 /**
  * Content type constants for categorising captured content.

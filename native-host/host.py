@@ -397,11 +397,55 @@ def save_entities(project_folder, entities):
         pass
 
 
-def classify_entry(entry, api_key, existing_topics, existing_entities, ai_summary=None):
+DEFAULT_CLASSIFICATION_PROMPT = """Analyze this knowledge base entry and classify it as "project", "task", or "knowledge".
+
+Title: {title}
+URL: {url}
+Content: {content}
+
+ENTITY CLASSIFICATION (in priority order):
+- "project" = References a bigger initiative, project idea, feature request, or something to build. If you see the word "project" it is a project. A video or image on its own is rarely going to be a project unless associated text indicates.
+- "task" = Action item, reminder, todo, something that needs to be done. If you see the word "task" it is a task. Unless you already decided it's a project.
+- "knowledge" = Fact, reference, documentation, information to remember. Unless already decided it's a project or task.
+- "unclassified" = Cannot determine from the content.
+
+TOPIC EXTRACTION:
+Extract 1-5 topic tags. STRONGLY prefer existing topics: {existing_topics}
+- If a topic is similar to an existing one (e.g. "React" vs "ReactJS", "ML" vs "Machine Learning"), use the EXISTING one
+- Only create a new topic if nothing similar exists
+
+PEOPLE EXTRACTION:
+Extract any people names mentioned.
+STRONGLY prefer existing people: {existing_people}
+- If a name matches an existing person's first name, use the FULL existing name (e.g. "Kevin" -> "Kevin Smith")
+- If a name has a typo but is similar to existing (e.g. "Jon" vs "John"), use the EXISTING correct spelling
+- Only add new people if no similar match exists
+
+Return JSON only:
+{
+  "entity": "project|task|knowledge|unclassified",
+  "topics": ["topic1", "topic2"],
+  "people": ["Kevin Smith", "Jane Doe"]
+}"""
+
+DEFAULT_GRAMMAR_PROMPT = """Fix spelling and grammar errors in this note. Use UK spelling and sentence case. Never use em dash. If you can improve wording and flow without losing meaning do that. If you cannot work out meaning then don't make major changes.
+Context: From {domain}
+Page: {title}
+Type: {type}
+Preserve technical terms, jargon, domain-specific language, brands, names of things, people etc. and capitalise them correctly.
+
+Original text: "{text}"
+
+Return JSON only:
+{{"corrected": "the corrected text here"}}"""
+
+
+def classify_entry(entry, api_key, existing_topics, existing_entities, ai_summary=None, custom_prompt=None):
     """
     Classify entry using OpenAI API.
     Returns dict with entity, topics, and people fields.
     ai_summary: Optional AI-generated summary to provide additional context for classification.
+    custom_prompt: Optional custom prompt template with placeholders.
     """
     log_file = Path(__file__).parent / 'host.log'
 
@@ -423,37 +467,17 @@ def classify_entry(entry, api_key, existing_topics, existing_entities, ai_summar
             content_parts.append(f"AI Description: {ai_summary}")
         content = ' '.join(part for part in content_parts if part).strip()
 
-        # Build prompt
-        prompt = f"""Analyze this knowledge base entry and classify it as "project", "task", or "knowledge".
+        # Use custom prompt or default
+        prompt_template = custom_prompt if custom_prompt else DEFAULT_CLASSIFICATION_PROMPT
 
-Title: {title}
-URL: {url}
-Content: {content}
-
-ENTITY CLASSIFICATION (in priority order):
-- "project" = References a bigger initiative, project idea, feature request, or something to build. If you see the word "project" it is a project. A video or image on its own is rarely going to be a project unless associated text indicates.
-- "task" = Action item, reminder, todo, something that needs to be done. If you see the word "task" it is a task. Unless you already decided it's a project.
-- "knowledge" = Fact, reference, documentation, information to remember. Unless already decided it's a project or task.
-- "unclassified" = Cannot determine from the content.
-
-TOPIC EXTRACTION:
-Extract 1-5 topic tags. STRONGLY prefer existing topics: {existing_topics}
-- If a topic is similar to an existing one (e.g. "React" vs "ReactJS", "ML" vs "Machine Learning"), use the EXISTING one
-- Only create a new topic if nothing similar exists
-
-PEOPLE EXTRACTION:
-Extract any people names mentioned.
-STRONGLY prefer existing people: {existing_entities}
-- If a name matches an existing person's first name, use the FULL existing name (e.g. "Kevin" -> "Kevin Smith")
-- If a name has a typo but is similar to existing (e.g. "Jon" vs "John"), use the EXISTING correct spelling
-- Only add new people if no similar match exists
-
-Return JSON only:
-{{
-  "entity": "project|task|knowledge|unclassified",
-  "topics": ["topic1", "topic2"],
-  "people": ["Kevin Smith", "Jane Doe"]
-}}"""
+        # Replace placeholders in prompt
+        prompt = prompt_template.format(
+            title=title,
+            url=url,
+            content=content,
+            existing_topics=existing_topics,
+            existing_people=existing_entities
+        )
 
         # Call OpenAI Responses API
         request_data = json.dumps({
@@ -516,10 +540,11 @@ Return JSON only:
         return None
 
 
-def fix_grammar_openai(text, entry, api_key):
+def fix_grammar_openai(text, entry, api_key, custom_prompt=None):
     """
     Fix spelling and grammar using OpenAI API.
     Returns corrected text or original if API fails.
+    custom_prompt: Optional custom prompt template with placeholders.
     """
     log_file = Path(__file__).parent / 'host.log'
 
@@ -531,32 +556,28 @@ def fix_grammar_openai(text, entry, api_key):
 
     try:
         # Build context for better corrections
-        context_info = ''
         url = entry.get('url', '')
-        title = entry.get('title', '')
+        title = entry.get('title', '')[:100] if entry.get('title') else ''
         entry_type = entry.get('type', '')
+        domain = ''
 
         if url:
             try:
                 from urllib.parse import urlparse
-                domain = urlparse(url).hostname
-                if domain:
-                    context_info += f"\nContext: From {domain}"
+                domain = urlparse(url).hostname or ''
             except Exception:
                 pass
-        if title:
-            context_info += f"\nPage: {title[:100]}"
-        if entry_type:
-            context_info += f"\nType: {entry_type}"
 
-        prompt = f"""Fix spelling and grammar errors in this note. Use UK spelling and sentence case. Never use em dash. If you can improve wording and flow without losing meaning do that. If you cannot work out meaning then don't make major changes.
-{context_info}
-Preserve technical terms, jargon, domain-specific language, brands, names of things, people etc. and capitalise them correctly.
+        # Use custom prompt or default
+        prompt_template = custom_prompt if custom_prompt else DEFAULT_GRAMMAR_PROMPT
 
-Original text: "{text}"
-
-Return JSON only:
-{{"corrected": "the corrected text here"}}"""
+        # Replace placeholders in prompt
+        prompt = prompt_template.format(
+            text=text,
+            domain=domain,
+            title=title,
+            type=entry_type
+        )
 
         # Call OpenAI Responses API
         request_data = json.dumps({
@@ -1421,7 +1442,7 @@ def save_file(project_folder, file_data_url, filename, timestamp):
         return None
 
 
-def append_to_kb(project_folder, entry, api_key=None):
+def append_to_kb(project_folder, entry, api_key=None, classification_prompt=None, grammar_prompt=None):
     """Append entry to kb.md file (at the top) with optional AI classification."""
     try:
         # Validate project folder
@@ -1488,7 +1509,9 @@ def append_to_kb(project_folder, entry, api_key=None):
                 'timestamp': entry['captured'],
                 'entry': entry,
                 'api_key': api_key,
-                'file_path': str(folder_path / saved_file_path) if saved_file_path else None
+                'file_path': str(folder_path / saved_file_path) if saved_file_path else None,
+                'classification_prompt': classification_prompt,
+                'grammar_prompt': grammar_prompt
             } if api_key else None
         }
 
@@ -1658,7 +1681,7 @@ def update_entry_notes(project_folder, timestamp, new_notes):
         return False
 
 
-def background_process_entry(project_folder, timestamp, entry, api_key, file_path=None):
+def background_process_entry(project_folder, timestamp, entry, api_key, file_path=None, classification_prompt=None, grammar_prompt=None):
     """
     Background thread for AI processing pipeline.
 
@@ -1675,6 +1698,8 @@ def background_process_entry(project_folder, timestamp, entry, api_key, file_pat
         entry (dict): Original entry data.
         api_key (str): OpenAI API key.
         file_path (str|None): Path to associated file for summarisation.
+        classification_prompt (str|None): Custom classification prompt template.
+        grammar_prompt (str|None): Custom grammar correction prompt template.
     """
     log_file = Path(__file__).parent / 'host.log'
 
@@ -1686,7 +1711,7 @@ def background_process_entry(project_folder, timestamp, entry, api_key, file_pat
 
         # STEP 1: Grammar fix (faster) - only fix notes, not selectedText
         if notes and api_key:
-            fixed_notes = fix_grammar_openai(notes, entry, api_key)
+            fixed_notes = fix_grammar_openai(notes, entry, api_key, grammar_prompt)
             if fixed_notes and fixed_notes != notes:
                 update_entry_notes(project_folder, timestamp, fixed_notes)
                 # Update entry dict for later steps to use corrected notes
@@ -1704,7 +1729,7 @@ def background_process_entry(project_folder, timestamp, entry, api_key, file_pat
         if api_key:
             existing_topics = load_topics(project_folder)
             existing_entities = load_entities(project_folder)
-            classification = classify_entry(entry, api_key, existing_topics, existing_entities, summary)
+            classification = classify_entry(entry, api_key, existing_topics, existing_entities, summary, classification_prompt)
 
             if classification:
                 # Save topics/entities to JSON files
@@ -2006,8 +2031,10 @@ def main():
                 project_folder = message.get('projectFolder')
                 entry = message.get('entry')
                 api_key = message.get('apiKey')  # API key for AI classification
+                classification_prompt = message.get('classificationPrompt') or None  # Empty string -> None
+                grammar_prompt = message.get('grammarPrompt') or None  # Empty string -> None
 
-                result = append_to_kb(project_folder, entry, api_key)
+                result = append_to_kb(project_folder, entry, api_key, classification_prompt, grammar_prompt)
 
                 # Extract background task before sending (don't send internal field to extension)
                 background_task = result.pop('_background_task', None)
@@ -2023,7 +2050,9 @@ def main():
                             background_task['timestamp'],
                             background_task['entry'],
                             background_task['api_key'],
-                            background_task.get('file_path')
+                            background_task.get('file_path'),
+                            background_task.get('classification_prompt'),
+                            background_task.get('grammar_prompt')
                         )
                     except Exception as bg_error:
                         with open(log_file, 'a', encoding='utf-8') as f:

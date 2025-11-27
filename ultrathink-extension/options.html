@@ -142,6 +142,67 @@
       font-size: 13px;
       color: #666;
     }
+
+    textarea {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 13px;
+      font-family: 'Courier New', monospace;
+      box-sizing: border-box;
+      resize: vertical;
+      line-height: 1.4;
+    }
+
+    .collapsible-header {
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      user-select: none;
+      padding: 8px 0;
+    }
+
+    .collapsible-header:hover {
+      color: #ff5200;
+    }
+
+    .collapsible-arrow {
+      margin-right: 8px;
+      transition: transform 0.2s;
+    }
+
+    .collapsible-content {
+      display: none;
+      padding-top: 12px;
+    }
+
+    .collapsible-content.open {
+      display: block;
+    }
+
+    .placeholder-tag {
+      display: inline-block;
+      background: #e8f4fd;
+      color: #1976d2;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      margin: 2px;
+    }
+
+    .reset-btn {
+      background: #e0e0e0;
+      color: #333;
+      padding: 6px 12px;
+      font-size: 12px;
+      margin-top: 8px;
+    }
+
+    .reset-btn:hover {
+      background: #d0d0d0;
+    }
   </style>
 </head>
 <body>
@@ -196,6 +257,45 @@
       Comma-separated list of repositories to search. Leave empty to search all accessible repos.
     </div>
     <div class="example">Example: anthropics/claude-code, myuser/my-project</div>
+  </div>
+
+  <h2 style="font-size: 18px; margin-top: 32px; margin-bottom: 16px; color: #333; border-top: 1px solid #ddd; padding-top: 24px;">AI Prompts</h2>
+
+  <div class="field">
+    <div class="collapsible-header" onclick="toggleCollapsible('classificationPrompt')">
+      <span class="collapsible-arrow" id="classificationPromptArrow">▶</span>
+      <label style="margin: 0; cursor: pointer;">Classification Prompt</label>
+    </div>
+    <div class="collapsible-content" id="classificationPromptContent">
+      <div class="help-text" style="margin-bottom: 8px;">
+        Customise how entries are classified as project/task/knowledge. Available placeholders:
+        <span class="placeholder-tag">{title}</span>
+        <span class="placeholder-tag">{url}</span>
+        <span class="placeholder-tag">{content}</span>
+        <span class="placeholder-tag">{existing_topics}</span>
+        <span class="placeholder-tag">{existing_people}</span>
+      </div>
+      <textarea id="classificationPrompt" rows="18"></textarea>
+      <button type="button" class="reset-btn" id="resetClassificationPrompt">Reset to default</button>
+    </div>
+  </div>
+
+  <div class="field">
+    <div class="collapsible-header" onclick="toggleCollapsible('grammarPrompt')">
+      <span class="collapsible-arrow" id="grammarPromptArrow">▶</span>
+      <label style="margin: 0; cursor: pointer;">Grammar Correction Prompt</label>
+    </div>
+    <div class="collapsible-content" id="grammarPromptContent">
+      <div class="help-text" style="margin-bottom: 8px;">
+        Customise how notes are grammar-checked. Available placeholders:
+        <span class="placeholder-tag">{text}</span>
+        <span class="placeholder-tag">{domain}</span>
+        <span class="placeholder-tag">{title}</span>
+        <span class="placeholder-tag">{type}</span>
+      </div>
+      <textarea id="grammarPrompt" rows="10"></textarea>
+      <button type="button" class="reset-btn" id="resetGrammarPrompt">Reset to default</button>
+    </div>
   </div>
 
   <button id="saveBtn">Save</button>

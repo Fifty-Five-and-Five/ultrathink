@@ -10,16 +10,40 @@ import http.server
 import json
 import os
 import re
+import time
 import webbrowser
 import mimetypes
 import urllib.request
 import urllib.error
 import urllib.parse
+from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlparse, unquote
+from urllib.parse import urlparse, unquote, parse_qs
 
 PORT = 8080
 PROJECT_FOLDER = Path(__file__).parent
+
+# In-memory log store for API calls (max 500 entries, FIFO)
+API_LOGS = []
+MAX_LOGS = 500
+
+
+def add_log(service, action, status, details=None, duration_ms=None, request_data=None, response_data=None):
+    """Add entry to in-memory log store for real-time monitoring."""
+    log_entry = {
+        'timestamp': datetime.now().isoformat(),
+        'service': service,       # 'openai', 'github', 'notion', etc.
+        'action': action,         # 'search', 'summarize', 'classify', etc.
+        'status': status,         # 'success', 'error', 'timeout'
+        'details': details,       # Brief message
+        'duration_ms': duration_ms,
+        'request': request_data,  # Request info
+        'response': response_data  # Response info
+    }
+    API_LOGS.insert(0, log_entry)  # Newest first
+    if len(API_LOGS) > MAX_LOGS:
+        API_LOGS.pop()
+
 
 # Regex patterns for parsing kb.md
 # NEW format: - `type` | `source` | `timestamp` | Title
@@ -375,13 +399,14 @@ def update_entry_status(timestamp, status):
         return {'success': False, 'error': f'Entry with timestamp {timestamp} not found'}
 
 
-def search_github(query, github_token, repos=None, max_results=10):
+def search_github(query, github_token, org=None, repos=None, max_results=10):
     """
     Search GitHub for issues and commits related to a query.
 
     Args:
         query: Search query string
         github_token: GitHub Personal Access Token
+        org: Organization name to search within (e.g., "Fifty-Five-and-Five")
         repos: Comma-separated list of repos (e.g., "owner/repo1, owner/repo2")
         max_results: Maximum results per search type
 
@@ -396,6 +421,8 @@ def search_github(query, github_token, repos=None, max_results=10):
 
     results = {
         'success': True,
+        'repositories': [],
+        'code': [],
         'issues': [],
         'commits': [],
         'query': query
@@ -408,13 +435,64 @@ def search_github(query, github_token, repos=None, max_results=10):
         'User-Agent': 'UltraThink-KB-Server'
     }
 
-    # Build query with optional repo filter
+    # Build query with org or repo filter
     base_query = query.strip()
-    if repos:
+
+    # Prefer org filter if set, otherwise use repos
+    if org and org.strip():
+        base_query = f'{base_query} org:{org.strip()}'
+    elif repos:
         repo_list = [r.strip() for r in repos.split(',') if r.strip()]
         if repo_list:
             repo_filter = ' '.join([f'repo:{r}' for r in repo_list])
             base_query = f'{base_query} {repo_filter}'
+
+    # Search repositories (use original query for repo search, org filter doesn't work the same way)
+    try:
+        repo_query = query.strip()
+        if org and org.strip():
+            repo_query = f'{repo_query} org:{org.strip()}'
+        repos_url = f'https://api.github.com/search/repositories?q={urllib.parse.quote(repo_query)}&per_page={max_results}&sort=updated'
+        req = urllib.request.Request(repos_url, headers=headers)
+
+        with urllib.request.urlopen(req, timeout=30) as response:
+            repos_data = json.loads(response.read().decode('utf-8'))
+
+        for item in repos_data.get('items', [])[:max_results]:
+            results['repositories'].append({
+                'name': item.get('name'),
+                'full_name': item.get('full_name'),
+                'description': (item.get('description') or '')[:200],
+                'url': item.get('html_url'),
+                'language': item.get('language'),
+                'stars': item.get('stargazers_count', 0),
+                'updated_at': item.get('updated_at')
+            })
+    except urllib.error.HTTPError as e:
+        print(f'GitHub repos search error: {e.code} {e.reason}')
+    except Exception as e:
+        print(f'GitHub repos search error: {e}')
+
+    # Search code (files)
+    try:
+        code_url = f'https://api.github.com/search/code?q={urllib.parse.quote(base_query)}&per_page={max_results}'
+        req = urllib.request.Request(code_url, headers=headers)
+
+        with urllib.request.urlopen(req, timeout=30) as response:
+            code_data = json.loads(response.read().decode('utf-8'))
+
+        for item in code_data.get('items', [])[:max_results]:
+            results['code'].append({
+                'name': item.get('name'),
+                'path': item.get('path'),
+                'url': item.get('html_url'),
+                'repo': item.get('repository', {}).get('full_name', ''),
+                'sha': item.get('sha', '')[:7]
+            })
+    except urllib.error.HTTPError as e:
+        print(f'GitHub code search error: {e.code} {e.reason}')
+    except Exception as e:
+        print(f'GitHub code search error: {e}')
 
     # Search issues
     try:
@@ -547,6 +625,19 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json(data.get('entities', []))
             else:
                 self.send_json([])
+
+        elif path == '/api/logs':
+            # Return API logs for real-time monitoring
+            query_params = parse_qs(parsed.query)
+            since = query_params.get('since', [None])[0]
+            limit = int(query_params.get('limit', [100])[0])
+
+            if since:
+                # Return only logs newer than 'since' timestamp
+                logs = [l for l in API_LOGS if l['timestamp'] > since]
+            else:
+                logs = API_LOGS[:limit]
+            self.send_json(logs)
 
         elif path == '/api/kanban-columns':
             # Return kanban columns from kanban-columns.json
@@ -713,6 +804,7 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
                     settings = json.load(f)
 
                 github_token = settings.get('github_token', '')
+                github_org = settings.get('github_org', '')
                 github_repos = settings.get('github_repos', '')
 
                 if not github_token:
@@ -720,10 +812,38 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
                     return
 
                 max_results = body.get('maxResults', 10)
-                result = search_github(query, github_token, github_repos, max_results)
+
+                # Log the GitHub API call
+                start_time = time.time()
+                result = search_github(query, github_token, github_org, github_repos, max_results)
+                duration = int((time.time() - start_time) * 1000)
+
+                add_log(
+                    service='github',
+                    action='search',
+                    status='success' if result.get('success') else 'error',
+                    details=f"Query: {query}" + (f" (org: {github_org})" if github_org else ""),
+                    duration_ms=duration,
+                    request_data={'query': query, 'org': github_org, 'max_results': max_results},
+                    response_data={
+                        'repositories': len(result.get('repositories', [])),
+                        'code': len(result.get('code', [])),
+                        'issues': len(result.get('issues', [])),
+                        'commits': len(result.get('commits', [])),
+                        'error': result.get('error')
+                    }
+                )
+
                 self.send_json(result)
             except Exception as e:
                 print(f'GitHub search endpoint error: {e}')
+                add_log(
+                    service='github',
+                    action='search',
+                    status='error',
+                    details=f"Exception: {str(e)}",
+                    request_data={'query': body.get('query', '')}
+                )
                 self.send_json({'success': False, 'error': str(e)}, 500)
 
         else:
@@ -840,6 +960,11 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json(result)
             else:
                 self.send_json({'success': False, 'error': 'Missing timestamp'}, 400)
+
+        elif parsed.path == '/api/logs':
+            # Clear all API logs
+            API_LOGS.clear()
+            self.send_json({'success': True})
 
         elif parsed.path == '/api/topics':
             name = body.get('name', '').strip()

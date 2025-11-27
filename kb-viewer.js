@@ -105,6 +105,23 @@ const VisState = {
     edges: null
 };
 
+/**
+ * Logs state container - manages real-time API logs display
+ * @namespace
+ */
+const LogsState = {
+    /** @type {Array} Current logs array */
+    logs: [],
+    /** @type {number|null} Polling interval ID */
+    pollInterval: null,
+    /** @type {string|null} Timestamp of most recent log for incremental updates */
+    lastTimestamp: null,
+    /** @type {boolean} Whether auto-refresh is enabled */
+    autoRefresh: true,
+    /** @type {boolean} Whether logs page has been initialized */
+    initialized: false
+};
+
 // Legacy variable aliases for backwards compatibility with existing code
 // These will be gradually removed as code is refactored
 let table = null;
@@ -1141,6 +1158,10 @@ function navigateToPage(page, filterContext = null) {
     document.getElementById('peoplePage').classList.remove('active');
     document.getElementById('visualisePage').classList.remove('active');
     document.getElementById('searchPage').classList.remove('active');
+    document.getElementById('logsPage').classList.remove('active');
+
+    // Stop logs polling when navigating away
+    stopLogsPolling();
 
     // Hide view toggle by default
     document.getElementById('viewToggle').style.display = 'none';
@@ -1158,6 +1179,9 @@ function navigateToPage(page, filterContext = null) {
     } else if (page === 'search') {
         document.getElementById('searchPage').classList.add('active');
         setupExternalSearch();
+    } else if (page === 'logs') {
+        document.getElementById('logsPage').classList.add('active');
+        initLogsPage();
     } else {
         // Show toolbar for home, project, task, knowledge
         document.querySelector('.toolbar').style.display = 'flex';
@@ -2594,10 +2618,14 @@ function renderGitHubResults(data, error) {
 
     if (!data) return '';
 
+    const repositories = data.repositories || [];
+    const code = data.code || [];
     const issues = data.issues || [];
     const commits = data.commits || [];
 
-    if (issues.length === 0 && commits.length === 0) {
+    const totalResults = repositories.length + code.length + issues.length + commits.length;
+
+    if (totalResults === 0) {
         return `
             <div class="search-results-section">
                 <h3>
@@ -2611,6 +2639,67 @@ function renderGitHubResults(data, error) {
     }
 
     let html = '';
+
+    // Repositories section
+    if (repositories.length > 0) {
+        html += `
+            <div class="search-results-section">
+                <h3>
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                        <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+                    </svg>
+                    GitHub Repositories <span class="search-result-count">(${repositories.length})</span>
+                </h3>
+        `;
+
+        repositories.forEach(repo => {
+            html += `
+                <div class="search-result-item">
+                    <div class="search-result-title">
+                        <a href="${escapeHtml(repo.url)}" target="_blank">${escapeHtml(repo.full_name)}</a>
+                    </div>
+                    <div class="search-result-meta">
+                        ${repo.language ? `<span class="search-result-lang">${escapeHtml(repo.language)}</span>` : ''}
+                        <span>⭐ ${repo.stars}</span>
+                        <span>${formatDate(repo.updated_at)}</span>
+                    </div>
+                    ${repo.description ? `<div class="search-result-preview">${escapeHtml(repo.description)}</div>` : ''}
+                </div>
+            `;
+        });
+
+        html += '</div>';
+    }
+
+    // Code section
+    if (code.length > 0) {
+        html += `
+            <div class="search-results-section">
+                <h3>
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="16 18 22 12 16 6"></polyline>
+                        <polyline points="8 6 2 12 8 18"></polyline>
+                    </svg>
+                    GitHub Code <span class="search-result-count">(${code.length})</span>
+                </h3>
+        `;
+
+        code.forEach(file => {
+            html += `
+                <div class="search-result-item">
+                    <div class="search-result-title">
+                        <a href="${escapeHtml(file.url)}" target="_blank">${escapeHtml(file.name)}</a>
+                    </div>
+                    <div class="search-result-meta">
+                        <span>${escapeHtml(file.repo)}</span>
+                        <span class="search-result-path">${escapeHtml(file.path)}</span>
+                    </div>
+                </div>
+            `;
+        });
+
+        html += '</div>';
+    }
 
     // Issues section
     if (issues.length > 0) {
@@ -2707,4 +2796,132 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// ============================================
+// Logs Page Functions
+// ============================================
+
+/**
+ * Initialize the logs page - set up event listeners and load initial data
+ */
+function initLogsPage() {
+    if (!LogsState.initialized) {
+        // Set up event listeners only once
+        document.getElementById('logsAutoRefresh').addEventListener('change', (e) => {
+            LogsState.autoRefresh = e.target.checked;
+            if (LogsState.autoRefresh) {
+                startLogsPolling();
+            } else {
+                stopLogsPolling();
+            }
+        });
+
+        document.getElementById('logsClear').addEventListener('click', async () => {
+            await fetch('/api/logs', { method: 'DELETE' });
+            LogsState.logs = [];
+            LogsState.lastTimestamp = null;
+            renderLogs();
+        });
+
+        LogsState.initialized = true;
+    }
+
+    // Load logs and start polling
+    loadLogs();
+    if (LogsState.autoRefresh) {
+        startLogsPolling();
+    }
+}
+
+/**
+ * Load all logs from the API
+ */
+async function loadLogs() {
+    try {
+        const response = await fetch('/api/logs');
+        LogsState.logs = await response.json();
+        if (LogsState.logs.length > 0) {
+            LogsState.lastTimestamp = LogsState.logs[0].timestamp;
+        }
+        renderLogs();
+    } catch (error) {
+        console.error('Failed to load logs:', error);
+    }
+}
+
+/**
+ * Start polling for new logs every 2.5 seconds
+ */
+function startLogsPolling() {
+    stopLogsPolling();
+    LogsState.pollInterval = setInterval(async () => {
+        try {
+            const url = LogsState.lastTimestamp
+                ? `/api/logs?since=${encodeURIComponent(LogsState.lastTimestamp)}`
+                : '/api/logs';
+            const response = await fetch(url);
+            const newLogs = await response.json();
+            if (newLogs.length > 0) {
+                LogsState.logs = [...newLogs, ...LogsState.logs].slice(0, 500);
+                LogsState.lastTimestamp = newLogs[0].timestamp;
+                renderLogs();
+            }
+        } catch (error) {
+            console.error('Logs polling error:', error);
+        }
+    }, 2500);
+}
+
+/**
+ * Stop polling for logs
+ */
+function stopLogsPolling() {
+    if (LogsState.pollInterval) {
+        clearInterval(LogsState.pollInterval);
+        LogsState.pollInterval = null;
+    }
+}
+
+/**
+ * Render the logs to the container
+ */
+function renderLogs() {
+    const container = document.getElementById('logsContainer');
+    if (!container) return;
+
+    if (LogsState.logs.length === 0) {
+        container.innerHTML = '<div class="logs-empty">No logs yet. Make an API call to see logs here.</div>';
+        return;
+    }
+
+    container.innerHTML = LogsState.logs.map(log => `
+        <div class="log-entry ${log.status}">
+            <span class="log-timestamp">${formatLogTime(log.timestamp)}</span>
+            <span class="log-service ${log.service}">${log.service}</span>
+            <span class="log-status ${log.status}">${log.status}${log.duration_ms ? ` (${log.duration_ms}ms)` : ''}</span>
+            <div class="log-details-wrapper">
+                <div class="log-message">${escapeHtml(log.details || log.action)}</div>
+                ${(log.request || log.response) ? `
+                    <div class="log-details">${log.request ? `Request: ${JSON.stringify(log.request, null, 2)}\n` : ''}${log.response ? `Response: ${JSON.stringify(log.response, null, 2)}` : ''}</div>
+                ` : ''}
+            </div>
+        </div>
+    `).join('');
+}
+
+/**
+ * Format ISO timestamp to readable time with milliseconds
+ * @param {string} isoString - ISO date string
+ * @returns {string} Formatted time string
+ */
+function formatLogTime(isoString) {
+    if (!isoString) return '';
+    try {
+        const d = new Date(isoString);
+        return d.toLocaleTimeString('en-GB', { hour12: false }) + '.' +
+               d.getMilliseconds().toString().padStart(3, '0');
+    } catch {
+        return isoString;
+    }
 }

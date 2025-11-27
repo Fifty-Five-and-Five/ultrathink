@@ -243,7 +243,9 @@ async function handleSaveSingle(request) {
       action: 'append',
       projectFolder: projectFolder,
       entry: data,
-      apiKey: settings.openaiKey || ''
+      apiKey: settings.openaiKey || '',
+      classificationPrompt: settings.classificationPrompt || '',
+      grammarPrompt: settings.grammarPrompt || ''
     };
 
     const response = await sendNativeMessage(message);
@@ -300,7 +302,9 @@ async function handleSaveAllTabs(request) {
         action: 'append',
         projectFolder: projectFolder,
         entry: data,
-        apiKey: apiKey
+        apiKey: apiKey,
+        classificationPrompt: settings.classificationPrompt || '',
+        grammarPrompt: settings.grammarPrompt || ''
       };
 
       const response = await sendNativeMessage(message);

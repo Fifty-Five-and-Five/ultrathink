@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "UltraThink URL Saver",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Save URLs, snippets, and ideas to your knowledge base markdown file",
   "permissions": [
     "activeTab",

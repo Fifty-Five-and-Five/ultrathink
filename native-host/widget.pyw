@@ -99,6 +99,7 @@ ICON_SAVE = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill=
 ICON_SPINNER = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="{color}"><path d="M136,32V64a8,8,0,0,1-16,0V32a8,8,0,0,1,16,0Zm37.25,58.75a8,8,0,0,0,5.66-2.35l22.63-22.62a8,8,0,0,0-11.32-11.32L167.6,77.09a8,8,0,0,0,5.65,13.66ZM224,120H192a8,8,0,0,0,0,16h32a8,8,0,0,0,0-16Zm-45.09,47.6a8,8,0,0,0-11.31,11.31l22.62,22.63a8,8,0,0,0,11.32-11.32ZM128,184a8,8,0,0,0-8,8v32a8,8,0,0,0,16,0V192A8,8,0,0,0,128,184ZM77.09,167.6,54.46,190.22a8,8,0,0,0,11.32,11.32L88.4,178.91A8,8,0,0,0,77.09,167.6ZM72,128a8,8,0,0,0-8-8H32a8,8,0,0,0,0,16H64A8,8,0,0,0,72,128ZM65.78,54.46A8,8,0,0,0,54.46,65.78L77.09,88.4A8,8,0,0,0,88.4,77.09Z"/></svg>'
 ICON_PLUS = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="{color}"><path d="M224,128a8,8,0,0,1-8,8H136v80a8,8,0,0,1-16,0V136H40a8,8,0,0,1,0-16h80V40a8,8,0,0,1,16,0v80h80A8,8,0,0,1,224,128Z"/></svg>'
 ICON_MINUS = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="{color}"><path d="M224,128a8,8,0,0,1-8,8H40a8,8,0,0,1,0-16H216A8,8,0,0,1,224,128Z"/></svg>'
+ICON_MONITOR = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="{color}"><path d="M208,40H48A24,24,0,0,0,24,64V176a24,24,0,0,0,24,24H96v16H72a8,8,0,0,0,0,16h112a8,8,0,0,0,0-16H160V200h48a24,24,0,0,0,24-24V64A24,24,0,0,0,208,40ZM48,56H208a8,8,0,0,1,8,8V160H40V64A8,8,0,0,1,48,56ZM208,184H48a8,8,0,0,1-8-8v-0H216v0A8,8,0,0,1,208,184Zm-64,16v16H112V200Z"/></svg>'
 
 
 def create_icon_from_svg(svg_data, size=16, color="#666"):
@@ -357,6 +358,10 @@ class UltraThinkWidget(QWidget):
         self.note_tabs = [{'html': '', 'timestamp': None}]
         self.current_tab_index = 0
 
+        # Multi-monitor mode
+        self.multi_monitor_enabled = False
+        self.mirror_widgets = []  # List of mirror widgets on other screens
+
         self.init_ui()
 
     def init_ui(self):
@@ -400,6 +405,17 @@ class UltraThinkWidget(QWidget):
         title.setStyleSheet("font-size: 14px; font-weight: 600; color: #333;")
         header.addWidget(title)
         header.addStretch()
+
+        # Multi-monitor toggle button
+        self.monitor_btn = QPushButton()
+        self.monitor_btn.setFixedSize(24, 24)
+        self.monitor_btn.setCursor(Qt.CursorShape.ArrowCursor)
+        self.monitor_btn.setIcon(create_icon_from_svg(ICON_MONITOR, 16, "#666"))
+        self.monitor_btn.setIconSize(QSize(16, 16))
+        self.monitor_btn.setToolTip("Show on all monitors")
+        self._update_monitor_btn_style()
+        self.monitor_btn.clicked.connect(self.toggle_multi_monitor)
+        header.addWidget(self.monitor_btn)
 
         close_btn = QPushButton("×")
         close_btn.setFixedSize(24, 24)
@@ -1885,6 +1901,228 @@ class UltraThinkWidget(QWidget):
             self.status_label.show()
         finally:
             self.show()
+
+    def _update_monitor_btn_style(self):
+        """Update monitor button style based on multi-monitor state."""
+        if self.multi_monitor_enabled:
+            # Active state - orange highlight
+            self.monitor_btn.setStyleSheet(f"""
+                QPushButton {{
+                    border: none;
+                    border-radius: 4px;
+                    background: {BORDER_COLOR};
+                }}
+                QPushButton:hover {{
+                    background: #e04900;
+                }}
+            """)
+            self.monitor_btn.setIcon(create_icon_from_svg(ICON_MONITOR, 16, "#fff"))
+            self.monitor_btn.setToolTip("Showing on all monitors (click to disable)")
+        else:
+            # Inactive state
+            self.monitor_btn.setStyleSheet("""
+                QPushButton {
+                    border: none;
+                    border-radius: 4px;
+                }
+                QPushButton:hover {
+                    background: #f5f5f5;
+                }
+            """)
+            self.monitor_btn.setIcon(create_icon_from_svg(ICON_MONITOR, 16, "#666"))
+            self.monitor_btn.setToolTip("Show on all monitors")
+
+    def toggle_multi_monitor(self):
+        """Toggle display on all monitors."""
+        self.multi_monitor_enabled = not self.multi_monitor_enabled
+        self._update_monitor_btn_style()
+
+        if self.multi_monitor_enabled:
+            self._create_mirror_widgets()
+        else:
+            self._destroy_mirror_widgets()
+
+    def _create_mirror_widgets(self):
+        """Create mirror widgets on all other screens."""
+        screens = QGuiApplication.screens()
+        primary_screen = QGuiApplication.primaryScreen()
+
+        # Get current position relative to primary screen
+        current_pos = self.pos()
+        current_size = self.size()
+
+        # Calculate position as percentage of screen for consistent placement
+        primary_geo = primary_screen.geometry()
+        rel_x = (current_pos.x() - primary_geo.x()) / primary_geo.width()
+        rel_y = (current_pos.y() - primary_geo.y()) / primary_geo.height()
+
+        for screen in screens:
+            if screen == primary_screen:
+                continue  # Skip primary - main widget is there
+
+            # Create a simple mirror widget for this screen
+            mirror = MirrorWidget(self)
+            mirror.resize(current_size)
+
+            # Position relative to this screen
+            screen_geo = screen.geometry()
+            x = screen_geo.x() + int(rel_x * screen_geo.width())
+            y = screen_geo.y() + int(rel_y * screen_geo.height())
+            mirror.move(x, y)
+            mirror.show()
+            self.mirror_widgets.append(mirror)
+
+    def _destroy_mirror_widgets(self):
+        """Close and remove all mirror widgets."""
+        for mirror in self.mirror_widgets:
+            mirror.close()
+        self.mirror_widgets.clear()
+
+    def closeEvent(self, event):
+        """Clean up mirror widgets when main widget closes."""
+        self._destroy_mirror_widgets()
+        super().closeEvent(event)
+
+
+class MirrorWidget(QWidget):
+    """Lightweight mirror widget for secondary monitors - just a drop target."""
+
+    def __init__(self, main_widget):
+        super().__init__()
+        self.main_widget = main_widget
+
+        # Frameless, always on top
+        self.setWindowFlags(
+            Qt.WindowType.Window |
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.WindowStaysOnTopHint |
+            Qt.WindowType.Tool  # Don't show in taskbar
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setMouseTracking(True)
+        self.setWindowTitle("UltraThink (Mirror)")
+        self.setMinimumSize(200, 200)
+
+        # For dragging
+        self._drag_pos = None
+
+        # Main container
+        self.container = QFrame(self)
+        self.container.setStyleSheet(f"""
+            QFrame#container {{
+                background: white;
+                border: {BORDER_WIDTH}px solid {BORDER_COLOR};
+                border-radius: 8px;
+            }}
+        """)
+        self.container.setObjectName("container")
+
+        layout = QVBoxLayout(self.container)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
+
+        # Header
+        header = QHBoxLayout()
+        title = QLabel("Ultrathink")
+        title.setStyleSheet("font-size: 14px; font-weight: 600; color: #333;")
+        header.addWidget(title)
+        header.addStretch()
+        layout.addLayout(header)
+
+        # Drop zone
+        self.drop_zone = QFrame()
+        self.drop_zone.setAcceptDrops(True)
+        self.drop_zone.setStyleSheet(f"""
+            QFrame {{
+                border: {BORDER_WIDTH}px dashed #ccc;
+                border-radius: 4px;
+                background: white;
+            }}
+        """)
+
+        drop_layout = QVBoxLayout(self.drop_zone)
+        drop_label = QLabel("Drop files here\n(Mirror)")
+        drop_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        drop_label.setStyleSheet("color: #666; font-size: 13px; border: none;")
+        drop_layout.addWidget(drop_label)
+        layout.addWidget(self.drop_zone, 1)
+
+        # Install event filter for drag/drop
+        self.drop_zone.installEventFilter(self)
+        self.setAcceptDrops(True)
+
+    def resizeEvent(self, event):
+        """Keep container filling the widget."""
+        self.container.setGeometry(0, 0, self.width(), self.height())
+
+    def eventFilter(self, obj, event):
+        """Handle drag/drop events on drop zone."""
+        if obj == self.drop_zone:
+            if event.type() == QEvent.Type.DragEnter:
+                event.acceptProposedAction()
+                self.drop_zone.setStyleSheet(f"""
+                    QFrame {{
+                        border: {BORDER_WIDTH}px dashed {BORDER_COLOR};
+                        border-radius: 4px;
+                        background: #fff5f0;
+                    }}
+                """)
+                return True
+            elif event.type() == QEvent.Type.DragLeave:
+                self.drop_zone.setStyleSheet(f"""
+                    QFrame {{
+                        border: {BORDER_WIDTH}px dashed #ccc;
+                        border-radius: 4px;
+                        background: white;
+                    }}
+                """)
+                return True
+            elif event.type() == QEvent.Type.Drop:
+                # Forward drop to main widget
+                self._forward_drop(event)
+                self.drop_zone.setStyleSheet(f"""
+                    QFrame {{
+                        border: {BORDER_WIDTH}px dashed #ccc;
+                        border-radius: 4px;
+                        background: white;
+                    }}
+                """)
+                return True
+        return super().eventFilter(obj, event)
+
+    def _forward_drop(self, event):
+        """Forward drop event to main widget for processing."""
+        mime = event.mimeData()
+        if mime.hasUrls():
+            files = [url.toLocalFile() for url in mime.urls() if url.isLocalFile()]
+            if files:
+                self.main_widget.handle_files(files)
+        elif mime.hasText():
+            self.main_widget.handle_text(mime.text())
+
+    def dragEnterEvent(self, event):
+        """Accept drag events on the widget itself."""
+        event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        """Forward drops to main widget."""
+        self._forward_drop(event)
+
+    def mousePressEvent(self, event):
+        """Start drag if in title area."""
+        if event.button() == Qt.MouseButton.LeftButton and event.position().y() < 40:
+            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        """Handle dragging."""
+        if self._drag_pos and event.buttons() == Qt.MouseButton.LeftButton:
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        """End drag."""
+        self._drag_pos = None
 
 
 def main():
