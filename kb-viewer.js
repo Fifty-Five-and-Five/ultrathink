@@ -1179,6 +1179,9 @@ function navigateToPage(page, filterContext = null) {
     } else if (page === 'search') {
         document.getElementById('searchPage').classList.add('active');
         setupExternalSearch();
+    } else if (page === 'settings') {
+        document.getElementById('settingsPage').classList.add('active');
+        initSettingsPage();
     } else if (page === 'logs') {
         document.getElementById('logsPage').classList.add('active');
         initLogsPage();
@@ -2523,7 +2526,10 @@ function setupExternalSearch() {
 async function performExternalSearch() {
     const query = document.getElementById('externalSearchInput').value.trim();
     const resultsContainer = document.getElementById('searchResultsContainer');
-    const searchGithub = document.getElementById('searchGithub').checked;
+    const searchGithub = document.getElementById('searchGithub')?.checked;
+    const searchNotion = document.getElementById('searchNotion')?.checked;
+    const searchFastmail = document.getElementById('searchFastmail')?.checked;
+    const searchCapsule = document.getElementById('searchCapsule')?.checked;
 
     if (!query) {
         showStatus('Please enter a search query', 'error');
@@ -2560,6 +2566,66 @@ async function performExternalSearch() {
         }
     }
 
+    // Search Notion if enabled
+    if (searchNotion) {
+        try {
+            const response = await fetch('/api/search/notion', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query, maxResults: 10 })
+            });
+
+            const result = await response.json();
+            if (result.success) {
+                allResults.push({ service: 'notion', data: result });
+            } else {
+                allResults.push({ service: 'notion', error: result.error });
+            }
+        } catch (error) {
+            allResults.push({ service: 'notion', error: error.message });
+        }
+    }
+
+    // Search Fastmail if enabled
+    if (searchFastmail) {
+        try {
+            const response = await fetch('/api/search/fastmail', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query, maxResults: 10 })
+            });
+
+            const result = await response.json();
+            if (result.success) {
+                allResults.push({ service: 'fastmail', data: result });
+            } else {
+                allResults.push({ service: 'fastmail', error: result.error });
+            }
+        } catch (error) {
+            allResults.push({ service: 'fastmail', error: error.message });
+        }
+    }
+
+    // Search Capsule CRM if enabled
+    if (searchCapsule) {
+        try {
+            const response = await fetch('/api/search/capsule', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query, maxResults: 10 })
+            });
+
+            const result = await response.json();
+            if (result.success) {
+                allResults.push({ service: 'capsule', data: result });
+            } else {
+                allResults.push({ service: 'capsule', error: result.error });
+            }
+        } catch (error) {
+            allResults.push({ service: 'capsule', error: error.message });
+        }
+    }
+
     // Render results
     renderSearchResults(allResults, query);
 }
@@ -2584,8 +2650,13 @@ function renderSearchResults(results, query) {
     results.forEach(result => {
         if (result.service === 'github') {
             html += renderGitHubResults(result.data, result.error);
+        } else if (result.service === 'notion') {
+            html += renderNotionResults(result.data, result.error);
+        } else if (result.service === 'fastmail') {
+            html += renderFastmailResults(result.data, result.error);
+        } else if (result.service === 'capsule') {
+            html += renderCapsuleResults(result.data, result.error);
         }
-        // Future: Add Notion, Fastmail, etc.
     });
 
     container.innerHTML = html || `
@@ -2772,6 +2843,361 @@ function renderGitHubResults(data, error) {
 }
 
 /**
+ * Render Notion search results
+ */
+function renderNotionResults(data, error) {
+    if (error) {
+        return `
+            <div class="search-results-section">
+                <h3>
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                        <path d="M4 4.5h16a1.5 1.5 0 011.5 1.5v12a1.5 1.5 0 01-1.5 1.5H4A1.5 1.5 0 012.5 18V6A1.5 1.5 0 014 4.5zM4 6v12h16V6H4zm2 2h12v2H6V8zm0 4h8v2H6v-2z"/>
+                    </svg>
+                    Notion
+                </h3>
+                <div class="search-error">
+                    <div class="search-error-icon">⚠️</div>
+                    <p>${escapeHtml(error)}</p>
+                </div>
+            </div>
+        `;
+    }
+
+    if (!data) return '';
+
+    const pages = data.pages || [];
+    const databases = data.databases || [];
+
+    const totalResults = pages.length + databases.length;
+
+    if (totalResults === 0) {
+        return `
+            <div class="search-results-section">
+                <h3>
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                        <path d="M4 4.5h16a1.5 1.5 0 011.5 1.5v12a1.5 1.5 0 01-1.5 1.5H4A1.5 1.5 0 012.5 18V6A1.5 1.5 0 014 4.5zM4 6v12h16V6H4zm2 2h12v2H6V8zm0 4h8v2H6v-2z"/>
+                    </svg>
+                    Notion <span class="search-result-count">(no results)</span>
+                </h3>
+            </div>
+        `;
+    }
+
+    let html = '';
+
+    // Pages section
+    if (pages.length > 0) {
+        html += `
+            <div class="search-results-section">
+                <h3>
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                        <path d="M4 4.5h16a1.5 1.5 0 011.5 1.5v12a1.5 1.5 0 01-1.5 1.5H4A1.5 1.5 0 012.5 18V6A1.5 1.5 0 014 4.5zM4 6v12h16V6H4zm2 2h12v2H6V8zm0 4h8v2H6v-2z"/>
+                    </svg>
+                    Notion Pages <span class="search-result-count">(${pages.length})</span>
+                </h3>
+        `;
+
+        pages.forEach(page => {
+            html += `
+                <div class="search-result-item">
+                    <div class="search-result-title">
+                        ${page.icon ? `<span class="search-result-icon">${page.icon}</span>` : ''}
+                        <a href="${escapeHtml(page.url)}" target="_blank">${escapeHtml(page.title)}</a>
+                    </div>
+                    <div class="search-result-meta">
+                        <span>Last edited: ${formatDate(page.last_edited)}</span>
+                    </div>
+                </div>
+            `;
+        });
+
+        html += '</div>';
+    }
+
+    // Databases section
+    if (databases.length > 0) {
+        html += `
+            <div class="search-results-section">
+                <h3>
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                        <ellipse cx="12" cy="5" rx="9" ry="3"/>
+                        <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
+                        <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+                    </svg>
+                    Notion Databases <span class="search-result-count">(${databases.length})</span>
+                </h3>
+        `;
+
+        databases.forEach(db => {
+            html += `
+                <div class="search-result-item">
+                    <div class="search-result-title">
+                        ${db.icon ? `<span class="search-result-icon">${db.icon}</span>` : ''}
+                        <a href="${escapeHtml(db.url)}" target="_blank">${escapeHtml(db.title)}</a>
+                    </div>
+                    <div class="search-result-meta">
+                        <span>Last edited: ${formatDate(db.last_edited)}</span>
+                    </div>
+                </div>
+            `;
+        });
+
+        html += '</div>';
+    }
+
+    return html;
+}
+
+/**
+ * Render Fastmail email search results
+ */
+function renderFastmailResults(data, error) {
+    if (error) {
+        return `
+            <div class="search-results-section">
+                <h3>
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                        <path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/>
+                    </svg>
+                    Fastmail
+                </h3>
+                <div class="search-error">
+                    <div class="search-error-icon">⚠️</div>
+                    <p>${escapeHtml(error)}</p>
+                </div>
+            </div>
+        `;
+    }
+
+    if (!data) return '';
+
+    const emails = data.emails || [];
+
+    if (emails.length === 0) {
+        return `
+            <div class="search-results-section">
+                <h3>
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                        <path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/>
+                    </svg>
+                    Fastmail <span class="search-result-count">(no results)</span>
+                </h3>
+            </div>
+        `;
+    }
+
+    let html = `
+        <div class="search-results-section">
+            <h3>
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                    <path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/>
+                </svg>
+                Fastmail Emails <span class="search-result-count">(${emails.length})</span>
+            </h3>
+    `;
+
+    emails.forEach(email => {
+        const fromName = email.from?.[0]?.name || email.from?.[0]?.email || 'Unknown';
+        const toList = (email.to || []).map(t => t.name || t.email).join(', ');
+        const ccList = (email.cc || []).map(c => c.name || c.email).join(', ');
+        const attachmentBadge = email.hasAttachment ? '<span class="email-attachment-badge">📎</span>' : '';
+
+        html += `
+            <div class="search-result-item email-result">
+                <div class="search-result-title">
+                    ${attachmentBadge}
+                    <span class="email-subject">${escapeHtml(email.subject)}</span>
+                </div>
+                <div class="search-result-meta email-meta">
+                    <span class="email-from"><strong>From:</strong> ${escapeHtml(fromName)}</span>
+                    <span class="email-to"><strong>To:</strong> ${escapeHtml(toList)}</span>
+                    ${ccList ? `<span class="email-cc"><strong>Cc:</strong> ${escapeHtml(ccList)}</span>` : ''}
+                    <span class="email-date">${formatDate(email.date)}</span>
+                    ${email.attachments > 0 ? `<span class="email-attachments">${email.attachments} attachment${email.attachments > 1 ? 's' : ''}</span>` : ''}
+                </div>
+                <div class="email-preview">${escapeHtml(email.preview)}</div>
+            </div>
+        `;
+    });
+
+    html += '</div>';
+    return html;
+}
+
+/**
+ * Render Capsule CRM search results
+ */
+function renderCapsuleResults(data, error) {
+    if (error) {
+        return `
+            <div class="search-results-section">
+                <h3>
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                        <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+                    </svg>
+                    Capsule CRM
+                </h3>
+                <div class="search-error">
+                    <div class="search-error-icon">&#9888;&#65039;</div>
+                    <p>${escapeHtml(error)}</p>
+                </div>
+            </div>
+        `;
+    }
+
+    if (!data) return '';
+
+    const parties = data.parties || [];
+    const opportunities = data.opportunities || [];
+    const tasks = data.tasks || [];
+    const projects = data.projects || [];
+
+    const totalResults = parties.length + opportunities.length + tasks.length + projects.length;
+
+    if (totalResults === 0) {
+        return `
+            <div class="search-results-section">
+                <h3>
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                        <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+                    </svg>
+                    Capsule CRM <span class="search-result-count">(no results)</span>
+                </h3>
+            </div>
+        `;
+    }
+
+    let html = '';
+
+    // Parties (Contacts/Organisations) section
+    if (parties.length > 0) {
+        html += `
+            <div class="search-results-section">
+                <h3>
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                        <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
+                    </svg>
+                    Capsule Contacts <span class="search-result-count">(${parties.length})</span>
+                </h3>
+        `;
+
+        parties.forEach(party => {
+            const typeLabel = party.type === 'organisation' ? 'Org' : 'Person';
+            html += `
+                <div class="search-result-item">
+                    <div class="search-result-title">
+                        <a href="${escapeHtml(party.url)}" target="_blank">${escapeHtml(party.name)}</a>
+                    </div>
+                    <div class="search-result-meta">
+                        <span class="search-result-label">${typeLabel}</span>
+                        ${party.email ? `<span>${escapeHtml(party.email)}</span>` : ''}
+                        ${party.phone ? `<span>${escapeHtml(party.phone)}</span>` : ''}
+                    </div>
+                </div>
+            `;
+        });
+
+        html += '</div>';
+    }
+
+    // Opportunities section
+    if (opportunities.length > 0) {
+        html += `
+            <div class="search-results-section">
+                <h3>
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                    </svg>
+                    Capsule Opportunities <span class="search-result-count">(${opportunities.length})</span>
+                </h3>
+        `;
+
+        opportunities.forEach(opp => {
+            const valueStr = opp.value ? `${opp.currency || ''} ${opp.value.toLocaleString()}`.trim() : '';
+            html += `
+                <div class="search-result-item">
+                    <div class="search-result-title">
+                        <a href="${escapeHtml(opp.url)}" target="_blank">${escapeHtml(opp.name)}</a>
+                    </div>
+                    <div class="search-result-meta">
+                        ${opp.milestone ? `<span class="search-result-label">${escapeHtml(opp.milestone)}</span>` : ''}
+                        ${valueStr ? `<span><strong>${valueStr}</strong></span>` : ''}
+                        ${opp.party_name ? `<span>${escapeHtml(opp.party_name)}</span>` : ''}
+                        ${opp.expected_close ? `<span>Close: ${formatDate(opp.expected_close)}</span>` : ''}
+                    </div>
+                    ${opp.description ? `<div class="search-result-preview">${escapeHtml(opp.description)}</div>` : ''}
+                </div>
+            `;
+        });
+
+        html += '</div>';
+    }
+
+    // Tasks section
+    if (tasks.length > 0) {
+        html += `
+            <div class="search-results-section">
+                <h3>
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M9 11l3 3L22 4"/>
+                        <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+                    </svg>
+                    Capsule Tasks <span class="search-result-count">(${tasks.length})</span>
+                </h3>
+        `;
+
+        tasks.forEach(task => {
+            html += `
+                <div class="search-result-item">
+                    <div class="search-result-title">
+                        <a href="${escapeHtml(task.url)}" target="_blank">${escapeHtml(task.description)}</a>
+                    </div>
+                    <div class="search-result-meta">
+                        ${task.category ? `<span class="search-result-label">${escapeHtml(task.category)}</span>` : ''}
+                        ${task.party_name ? `<span>${escapeHtml(task.party_name)}</span>` : ''}
+                        ${task.due_on ? `<span>Due: ${formatDate(task.due_on)}</span>` : ''}
+                    </div>
+                </div>
+            `;
+        });
+
+        html += '</div>';
+    }
+
+    // Projects (Cases) section
+    if (projects.length > 0) {
+        html += `
+            <div class="search-results-section">
+                <h3>
+                    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                    </svg>
+                    Capsule Projects <span class="search-result-count">(${projects.length})</span>
+                </h3>
+        `;
+
+        projects.forEach(proj => {
+            html += `
+                <div class="search-result-item">
+                    <div class="search-result-title">
+                        <a href="${escapeHtml(proj.url)}" target="_blank">${escapeHtml(proj.name)}</a>
+                    </div>
+                    <div class="search-result-meta">
+                        ${proj.status ? `<span class="search-result-label">${escapeHtml(proj.status)}</span>` : ''}
+                        ${proj.party_name ? `<span>${escapeHtml(proj.party_name)}</span>` : ''}
+                    </div>
+                    ${proj.description ? `<div class="search-result-preview">${escapeHtml(proj.description)}</div>` : ''}
+                </div>
+            `;
+        });
+
+        html += '</div>';
+    }
+
+    return html;
+}
+
+/**
  * Format ISO date string to readable format
  */
 function formatDate(isoDate) {
@@ -2796,6 +3222,274 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// ============================================
+// Settings Page Functions
+// ============================================
+
+let settingsInitialized = false;
+
+// Default prompts (same as in host.py)
+const DEFAULT_CLASSIFICATION_PROMPT = `Analyze this knowledge base entry and classify it as "project", "task", or "knowledge".
+
+Title: {title}
+URL: {url}
+Content: {content}
+
+ENTITY CLASSIFICATION (in priority order):
+- "project" = References a bigger initiative, project idea, feature request, or something to build. If you see the word "project" it is a project. A video or image on its own is rarely going to be a project unless associated text indicates.
+- "task" = Action item, reminder, todo, something that needs to be done. If you see the word "task" it is a task. Unless you already decided it's a project.
+- "knowledge" = Fact, reference, documentation, information to remember. Unless already decided it's a project or task.
+- "unclassified" = Cannot determine from the content.
+
+TOPIC EXTRACTION:
+Extract 1-5 topic tags. STRONGLY prefer existing topics: {existing_topics}
+- If a topic is similar to an existing one (e.g. "React" vs "ReactJS", "ML" vs "Machine Learning"), use the EXISTING one
+- Only create a new topic if nothing similar exists
+
+PEOPLE EXTRACTION:
+Extract any people names mentioned.
+STRONGLY prefer existing people: {existing_people}
+- If a name matches an existing person's first name, use the FULL existing name (e.g. "Kevin" -> "Kevin Smith")
+- If a name has a typo but is similar to existing (e.g. "Jon" vs "John"), use the EXISTING correct spelling
+- Only add new people if no similar match exists
+
+Return JSON only:
+{
+  "entity": "project|task|knowledge|unclassified",
+  "topics": ["topic1", "topic2"],
+  "people": ["Kevin Smith", "Jane Doe"]
+}`;
+
+const DEFAULT_GRAMMAR_PROMPT = `Fix spelling and grammar errors in this note. Use UK spelling and sentence case. Never use em dash. If you can improve wording and flow without losing meaning do that. If you cannot work out meaning then don't make major changes.
+Context: From {domain}
+Page: {title}
+Type: {type}
+Preserve technical terms, jargon, domain-specific language, brands, names of things, people etc. and capitalise them correctly.
+
+Original text: "{text}"
+
+Return JSON only:
+{"corrected": "the corrected text here"}`;
+
+const DEFAULT_IMAGE_PROMPT = `Describe what is shown in this image in 2-3 sentences. Focus on the key elements and purpose.`;
+
+const DEFAULT_AUDIO_PROMPT = `Analyze this audio transcript and provide:
+
+1. **Summary**: A 2-3 sentence description of what is discussed/happening in this audio.
+
+2. **Speakers**: Based on the content, speaking styles, and any context provided, attempt to identify who is speaking. List speakers as "Speaker 1", "Speaker 2" etc, and if you can infer names or roles from context, include them (e.g., "Speaker 1 (likely John, the manager)").
+
+3. **Transcript**: Include the full transcript below.
+{notes}
+
+TRANSCRIPT:
+{transcript}`;
+
+const DEFAULT_DOCUMENT_PROMPT = `Summarise this document in 2-3 sentences. What is the main topic and key points?
+
+{content}`;
+
+const DEFAULT_LINK_PROMPT = `Browse this URL and provide a comprehensive summary of the page content.
+
+URL: {url}
+Page title: {title}
+User notes: {notes}
+
+Search the web for useful links, evidence, extra context or additional information related to this page. Cite all sources in your response.
+
+Provide:
+1. A 2-3 sentence summary of what the page is about
+2. Key information, facts, or takeaways from the content
+3. Any relevant context, related links, or supporting evidence you found
+4. List all sources at the end`;
+
+const DEFAULT_TEXT_PROMPT = `Summarise this text in 1-2 sentences:
+
+{text}
+
+Return just the summary.`;
+
+const DEFAULT_RESEARCH_PROMPT = `Do background research on this topic and provide a 2-3 paragraph summary:
+
+{notes}`;
+
+/**
+ * Initialize the settings page
+ */
+function initSettingsPage() {
+    if (!settingsInitialized) {
+        // Set up save buttons
+        document.getElementById('saveSettingsBtn').addEventListener('click', saveSettings);
+        document.getElementById('savePromptsBtn').addEventListener('click', savePrompts);
+
+        // Set up reset buttons
+        document.getElementById('resetClassificationPrompt').addEventListener('click', () => {
+            document.getElementById('settingClassificationPrompt').value = DEFAULT_CLASSIFICATION_PROMPT;
+        });
+        document.getElementById('resetGrammarPrompt').addEventListener('click', () => {
+            document.getElementById('settingGrammarPrompt').value = DEFAULT_GRAMMAR_PROMPT;
+        });
+        document.getElementById('resetImagePrompt').addEventListener('click', () => {
+            document.getElementById('settingImagePrompt').value = DEFAULT_IMAGE_PROMPT;
+        });
+        document.getElementById('resetAudioPrompt').addEventListener('click', () => {
+            document.getElementById('settingAudioPrompt').value = DEFAULT_AUDIO_PROMPT;
+        });
+        document.getElementById('resetDocumentPrompt').addEventListener('click', () => {
+            document.getElementById('settingDocumentPrompt').value = DEFAULT_DOCUMENT_PROMPT;
+        });
+        document.getElementById('resetLinkPrompt').addEventListener('click', () => {
+            document.getElementById('settingLinkPrompt').value = DEFAULT_LINK_PROMPT;
+        });
+        document.getElementById('resetTextPrompt').addEventListener('click', () => {
+            document.getElementById('settingTextPrompt').value = DEFAULT_TEXT_PROMPT;
+        });
+        document.getElementById('resetResearchPrompt').addEventListener('click', () => {
+            document.getElementById('settingResearchPrompt').value = DEFAULT_RESEARCH_PROMPT;
+        });
+
+        settingsInitialized = true;
+    }
+    // Load current settings
+    loadSettings();
+}
+
+/**
+ * Load settings from server and populate form
+ */
+async function loadSettings() {
+    try {
+        const response = await fetch('/api/settings');
+        const settings = await response.json();
+
+        // Populate integration fields
+        document.getElementById('settingGithubToken').value = settings.github_token || '';
+        document.getElementById('settingGithubOrg').value = settings.github_org || '';
+        document.getElementById('settingGithubRepos').value = settings.github_repos || '';
+        document.getElementById('settingNotionToken').value = settings.notion_token || '';
+        document.getElementById('settingFastmailToken').value = settings.fastmail_token || '';
+        document.getElementById('settingCapsuleToken').value = settings.capsule_token || '';
+        document.getElementById('settingOpenaiKey').value = settings.openai_api_key || '';
+
+        // Populate prompt fields (use saved value or default)
+        document.getElementById('settingClassificationPrompt').value =
+            settings.classification_prompt || DEFAULT_CLASSIFICATION_PROMPT;
+        document.getElementById('settingGrammarPrompt').value =
+            settings.grammar_prompt || DEFAULT_GRAMMAR_PROMPT;
+        document.getElementById('settingImagePrompt').value =
+            settings.image_prompt || DEFAULT_IMAGE_PROMPT;
+        document.getElementById('settingAudioPrompt').value =
+            settings.audio_prompt || DEFAULT_AUDIO_PROMPT;
+        document.getElementById('settingDocumentPrompt').value =
+            settings.document_prompt || DEFAULT_DOCUMENT_PROMPT;
+        document.getElementById('settingLinkPrompt').value =
+            settings.link_prompt || DEFAULT_LINK_PROMPT;
+        document.getElementById('settingTextPrompt').value =
+            settings.text_prompt || DEFAULT_TEXT_PROMPT;
+        document.getElementById('settingResearchPrompt').value =
+            settings.research_prompt || DEFAULT_RESEARCH_PROMPT;
+    } catch (error) {
+        console.error('Failed to load settings:', error);
+    }
+}
+
+/**
+ * Save settings to server
+ */
+async function saveSettings() {
+    const statusEl = document.getElementById('settingsStatus');
+    statusEl.textContent = 'Saving...';
+    statusEl.className = 'settings-status';
+
+    const settings = {
+        github_token: document.getElementById('settingGithubToken').value,
+        github_org: document.getElementById('settingGithubOrg').value,
+        github_repos: document.getElementById('settingGithubRepos').value,
+        notion_token: document.getElementById('settingNotionToken').value,
+        fastmail_token: document.getElementById('settingFastmailToken').value,
+        capsule_token: document.getElementById('settingCapsuleToken').value,
+        openai_api_key: document.getElementById('settingOpenaiKey').value
+    };
+
+    try {
+        const response = await fetch('/api/settings', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings)
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            statusEl.textContent = 'Saved!';
+            statusEl.className = 'settings-status';
+            // Reload to show masked values
+            setTimeout(() => {
+                loadSettings();
+                statusEl.textContent = '';
+            }, 1500);
+        } else {
+            statusEl.textContent = result.error || 'Failed to save';
+            statusEl.className = 'settings-status error';
+        }
+    } catch (error) {
+        statusEl.textContent = 'Error: ' + error.message;
+        statusEl.className = 'settings-status error';
+    }
+}
+
+/**
+ * Save AI prompts to server
+ */
+async function savePrompts() {
+    const statusEl = document.getElementById('promptsStatus');
+    statusEl.textContent = 'Saving...';
+    statusEl.className = 'settings-status';
+
+    const classificationPrompt = document.getElementById('settingClassificationPrompt').value.trim();
+    const grammarPrompt = document.getElementById('settingGrammarPrompt').value.trim();
+    const imagePrompt = document.getElementById('settingImagePrompt').value.trim();
+    const audioPrompt = document.getElementById('settingAudioPrompt').value.trim();
+    const documentPrompt = document.getElementById('settingDocumentPrompt').value.trim();
+    const linkPrompt = document.getElementById('settingLinkPrompt').value.trim();
+    const textPrompt = document.getElementById('settingTextPrompt').value.trim();
+    const researchPrompt = document.getElementById('settingResearchPrompt').value.trim();
+
+    // Save empty string if user hasn't modified from default (saves storage)
+    const settings = {
+        classification_prompt: (classificationPrompt === DEFAULT_CLASSIFICATION_PROMPT) ? '' : classificationPrompt,
+        grammar_prompt: (grammarPrompt === DEFAULT_GRAMMAR_PROMPT) ? '' : grammarPrompt,
+        image_prompt: (imagePrompt === DEFAULT_IMAGE_PROMPT) ? '' : imagePrompt,
+        audio_prompt: (audioPrompt === DEFAULT_AUDIO_PROMPT) ? '' : audioPrompt,
+        document_prompt: (documentPrompt === DEFAULT_DOCUMENT_PROMPT) ? '' : documentPrompt,
+        link_prompt: (linkPrompt === DEFAULT_LINK_PROMPT) ? '' : linkPrompt,
+        text_prompt: (textPrompt === DEFAULT_TEXT_PROMPT) ? '' : textPrompt,
+        research_prompt: (researchPrompt === DEFAULT_RESEARCH_PROMPT) ? '' : researchPrompt
+    };
+
+    try {
+        const response = await fetch('/api/settings', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings)
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            statusEl.textContent = 'Saved!';
+            statusEl.className = 'settings-status';
+            setTimeout(() => {
+                statusEl.textContent = '';
+            }, 1500);
+        } else {
+            statusEl.textContent = result.error || 'Failed to save';
+            statusEl.className = 'settings-status error';
+        }
+    } catch (error) {
+        statusEl.textContent = 'Error: ' + error.message;
+        statusEl.className = 'settings-status error';
+    }
 }
 
 // ============================================

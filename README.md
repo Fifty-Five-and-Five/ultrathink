@@ -50,9 +50,11 @@ A powerful Microsoft Edge extension that captures URLs, text snippets, screensho
 - **Persistence**: Status saved to kb.md as `Status: column-id`
 
 ### External Service Search
-- **GitHub integration**: Search issues and commits across your repos
+- **GitHub integration**: Search repositories, code, issues, and commits across your repos
+- **Notion integration**: Search pages and databases shared with your integration
+- **Fastmail integration**: Search emails via JMAP protocol
+- **Capsule CRM integration**: Search contacts, organisations, opportunities, tasks, and projects
 - **Unified search**: Search multiple services from one interface
-- **Coming soon**: Notion, Fastmail/Email integration
 
 ### Desktop Widget
 - **Always-on-top**: PyQt6-based floating widget for quick captures
@@ -120,6 +122,9 @@ ultrathink/
 - Python 3.x installed and in PATH
 - OpenAI API key (for AI features)
 - Optional: GitHub Personal Access Token (for GitHub search)
+- Optional: Notion Internal Integration Token (for Notion search)
+- Optional: Fastmail API Token (for email search)
+- Optional: Capsule CRM API Token (for CRM search)
 
 ## Installation
 
@@ -173,6 +178,39 @@ python generate_icons.py
      "openai_key": "sk-...",
      "github_token": "ghp_...",
      "github_repos": "owner/repo1, owner/repo2"
+   }
+   ```
+
+### Step 7: Configure Notion Search (Optional)
+
+1. Create a Notion Internal Integration at https://www.notion.so/my-integrations
+2. Share the pages/databases you want to search with the integration
+3. Add to `native-host/settings.json`:
+   ```json
+   {
+     "notion_token": "secret_..."
+   }
+   ```
+
+### Step 8: Configure Fastmail Search (Optional)
+
+1. Create an API Token at Fastmail Settings > API Tokens
+2. Add to `native-host/settings.json`:
+   ```json
+   {
+     "fastmail_token": "fmu1-..."
+   }
+   ```
+
+### Step 9: Configure Capsule CRM Search (Optional)
+
+1. Log into Capsule CRM
+2. Go to My Preferences > API Authentication Tokens
+3. Create a new token
+4. Add to `native-host/settings.json`:
+   ```json
+   {
+     "capsule_token": "your-token-here"
    }
    ```
 
@@ -346,7 +384,12 @@ Each entry in `kb.md` looks like this:
 
 ## Version History
 
-- **v2.2.0** (Current)
+- **v2.3.0** (Current)
+  - Capsule CRM integration: Search contacts, organisations, opportunities, tasks, and projects
+  - New Capsule CRM checkbox in Search page
+  - Configurable via `capsule_token` in `native-host/settings.json`
+
+- **v2.2.0**
   - Customisable AI prompts: Edit classification and grammar prompts in extension settings
   - Collapsible prompt sections with placeholder tags ({title}, {content}, etc.)
   - Reset to default buttons for prompt customisation

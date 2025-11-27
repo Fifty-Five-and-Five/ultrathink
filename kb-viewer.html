@@ -1835,6 +1835,119 @@
             display: block;
         }
 
+        /* Settings Page Styles */
+        .settings-content {
+            max-width: 600px;
+        }
+
+        .settings-section {
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 24px;
+        }
+
+        .settings-section h3 {
+            font-size: 16px;
+            font-weight: 600;
+            margin: 0 0 8px 0;
+            color: #111827;
+        }
+
+        .settings-description {
+            font-size: 14px;
+            color: #6b7280;
+            margin: 0 0 24px 0;
+        }
+
+        .settings-description code {
+            background: #f3f4f6;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+
+        .settings-field {
+            margin-bottom: 20px;
+        }
+
+        .settings-field label {
+            display: block;
+            font-size: 14px;
+            font-weight: 500;
+            color: #374151;
+            margin-bottom: 6px;
+        }
+
+        .settings-field input {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 14px;
+            font-family: 'SF Mono', 'Monaco', monospace;
+            box-sizing: border-box;
+        }
+
+        .settings-field input:focus {
+            outline: none;
+            border-color: #ff5200;
+            box-shadow: 0 0 0 3px rgba(255, 82, 0, 0.1);
+        }
+
+        .settings-field textarea {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-size: 13px;
+            font-family: 'SF Mono', 'Monaco', monospace;
+            box-sizing: border-box;
+            resize: vertical;
+            line-height: 1.5;
+        }
+
+        .settings-field textarea:focus {
+            outline: none;
+            border-color: #ff5200;
+            box-shadow: 0 0 0 3px rgba(255, 82, 0, 0.1);
+        }
+
+        .btn-small {
+            padding: 4px 10px;
+            font-size: 12px;
+            margin-top: 6px;
+        }
+
+        .settings-help {
+            display: block;
+            font-size: 12px;
+            color: #9ca3af;
+            margin-top: 4px;
+        }
+
+        .settings-help a {
+            color: #ff5200;
+        }
+
+        .settings-actions {
+            margin-top: 24px;
+            padding-top: 20px;
+            border-top: 1px solid #e5e7eb;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .settings-status {
+            font-size: 14px;
+            color: #059669;
+        }
+
+        .settings-status.error {
+            color: #dc2626;
+        }
+
         /* Logs Page Styles */
         .logs-controls {
             display: flex;
@@ -2009,6 +2122,13 @@
                         <span>People</span>
                     </a>
                     <div class="nav-divider"></div>
+                    <a class="nav-item" data-page="settings">
+                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="3"></circle>
+                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                        </svg>
+                        <span>Settings</span>
+                    </a>
                     <a class="nav-item" data-page="logs">
                         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
@@ -2154,15 +2274,20 @@
                                 <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
                                 GitHub
                             </label>
-                            <label class="search-service-check disabled" title="Coming soon">
-                                <input type="checkbox" disabled>
+                            <label class="search-service-check">
+                                <input type="checkbox" id="searchNotion" checked>
                                 <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M4 4h6v6H4zm10 0h6v6h-6zM4 14h6v6H4zm10 0h6v6h-6z"/></svg>
                                 Notion
                             </label>
-                            <label class="search-service-check disabled" title="Coming soon">
-                                <input type="checkbox" disabled>
+                            <label class="search-service-check">
+                                <input type="checkbox" id="searchFastmail" checked>
                                 <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/></svg>
-                                Email
+                                Fastmail
+                            </label>
+                            <label class="search-service-check">
+                                <input type="checkbox" id="searchCapsule" checked>
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+                                Capsule CRM
                             </label>
                         </div>
                     </div>
@@ -2173,6 +2298,132 @@
                                 <path d="M229.66,218.34l-50.07-50.06a88.11,88.11,0,1,0-11.31,11.31l50.06,50.07a8,8,0,0,0,11.32-11.32ZM40,112a72,72,0,1,1,72,72A72.08,72.08,0,0,1,40,112Z"/>
                             </svg>
                             <p>Enter a search query to find related content across your connected services.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Settings Page -->
+                <div class="management-page" id="settingsPage">
+                    <div class="management-header">
+                        <h2>Settings</h2>
+                    </div>
+                    <div class="settings-content">
+                        <div class="settings-section">
+                            <h3>External integrations</h3>
+                            <p class="settings-description">Configure API tokens for external service integrations. These are stored in <code>native-host/settings.json</code>.</p>
+
+                            <div class="settings-field">
+                                <label for="settingGithubToken">GitHub token</label>
+                                <input type="password" id="settingGithubToken" placeholder="ghp_... or github_pat_...">
+                                <span class="settings-help">Create at <a href="https://github.com/settings/tokens?type=beta" target="_blank">GitHub Settings</a> with repository read access</span>
+                            </div>
+
+                            <div class="settings-field">
+                                <label for="settingGithubOrg">GitHub organisation</label>
+                                <input type="text" id="settingGithubOrg" placeholder="e.g. my-org">
+                                <span class="settings-help">Optional: limit searches to this organisation</span>
+                            </div>
+
+                            <div class="settings-field">
+                                <label for="settingGithubRepos">GitHub repositories</label>
+                                <input type="text" id="settingGithubRepos" placeholder="owner/repo1, owner/repo2">
+                                <span class="settings-help">Optional: comma-separated list of specific repos to search</span>
+                            </div>
+
+                            <div class="settings-field">
+                                <label for="settingNotionToken">Notion token</label>
+                                <input type="password" id="settingNotionToken" placeholder="secret_... or ntn_...">
+                                <span class="settings-help">Create at <a href="https://www.notion.so/my-integrations" target="_blank">Notion Integrations</a> and share pages with it</span>
+                            </div>
+
+                            <div class="settings-field">
+                                <label for="settingFastmailToken">Fastmail token</label>
+                                <input type="password" id="settingFastmailToken" placeholder="fmu1-...">
+                                <span class="settings-help">Create at <a href="https://www.fastmail.com/settings/security/tokens" target="_blank">Fastmail Settings</a> with Mail read-only scope</span>
+                            </div>
+
+                            <div class="settings-field">
+                                <label for="settingCapsuleToken">Capsule CRM token</label>
+                                <input type="password" id="settingCapsuleToken" placeholder="Your Capsule API token">
+                                <span class="settings-help">Create at <a href="https://app.capsulecrm.com/user/api" target="_blank">Capsule API Tokens</a> in My Preferences</span>
+                            </div>
+
+                            <div class="settings-field">
+                                <label for="settingOpenaiKey">OpenAI API key</label>
+                                <input type="password" id="settingOpenaiKey" placeholder="sk-proj-...">
+                                <span class="settings-help">Used for AI summaries. Get from <a href="https://platform.openai.com/api-keys" target="_blank">OpenAI</a></span>
+                            </div>
+
+                            <div class="settings-actions">
+                                <button class="btn btn-primary" id="saveSettingsBtn">Save settings</button>
+                                <span class="settings-status" id="settingsStatus"></span>
+                            </div>
+                        </div>
+
+                        <div class="settings-section">
+                            <h3>AI prompts</h3>
+                            <p class="settings-description">Customise the prompts used for AI processing. Leave empty to use defaults.</p>
+
+                            <div class="settings-field">
+                                <label for="settingClassificationPrompt">Classification prompt</label>
+                                <textarea id="settingClassificationPrompt" rows="12" placeholder="Customise how entries are classified..."></textarea>
+                                <span class="settings-help">Placeholders: {title}, {url}, {content}, {existing_topics}, {existing_people}</span>
+                                <button class="btn btn-secondary btn-small" id="resetClassificationPrompt">Reset to default</button>
+                            </div>
+
+                            <div class="settings-field">
+                                <label for="settingGrammarPrompt">Grammar correction prompt</label>
+                                <textarea id="settingGrammarPrompt" rows="8" placeholder="Customise grammar correction..."></textarea>
+                                <span class="settings-help">Placeholders: {text}, {domain}, {title}, {type}</span>
+                                <button class="btn btn-secondary btn-small" id="resetGrammarPrompt">Reset to default</button>
+                            </div>
+
+                            <div class="settings-field">
+                                <label for="settingImagePrompt">Image summary prompt</label>
+                                <textarea id="settingImagePrompt" rows="4" placeholder="Customise image description..."></textarea>
+                                <span class="settings-help">Used for screenshots and images. No placeholders.</span>
+                                <button class="btn btn-secondary btn-small" id="resetImagePrompt">Reset to default</button>
+                            </div>
+
+                            <div class="settings-field">
+                                <label for="settingAudioPrompt">Audio summary prompt</label>
+                                <textarea id="settingAudioPrompt" rows="8" placeholder="Customise audio transcription analysis..."></textarea>
+                                <span class="settings-help">Placeholders: {transcript}, {notes}</span>
+                                <button class="btn btn-secondary btn-small" id="resetAudioPrompt">Reset to default</button>
+                            </div>
+
+                            <div class="settings-field">
+                                <label for="settingDocumentPrompt">Document summary prompt</label>
+                                <textarea id="settingDocumentPrompt" rows="4" placeholder="Customise document summarisation..."></textarea>
+                                <span class="settings-help">Used for PDFs, markdown, and text documents. Placeholder: {content}</span>
+                                <button class="btn btn-secondary btn-small" id="resetDocumentPrompt">Reset to default</button>
+                            </div>
+
+                            <div class="settings-field">
+                                <label for="settingLinkPrompt">Link summary prompt</label>
+                                <textarea id="settingLinkPrompt" rows="10" placeholder="Customise web link analysis..."></textarea>
+                                <span class="settings-help">Placeholders: {url}, {title}, {notes}. Uses web search.</span>
+                                <button class="btn btn-secondary btn-small" id="resetLinkPrompt">Reset to default</button>
+                            </div>
+
+                            <div class="settings-field">
+                                <label for="settingTextPrompt">Text summary prompt</label>
+                                <textarea id="settingTextPrompt" rows="4" placeholder="Customise text summarisation..."></textarea>
+                                <span class="settings-help">Used for snippets, notes, ideas. Placeholder: {text}</span>
+                                <button class="btn btn-secondary btn-small" id="resetTextPrompt">Reset to default</button>
+                            </div>
+
+                            <div class="settings-field">
+                                <label for="settingResearchPrompt">Research summary prompt</label>
+                                <textarea id="settingResearchPrompt" rows="4" placeholder="Customise research summary..."></textarea>
+                                <span class="settings-help">Used for long notes requiring background research. Placeholder: {notes}</span>
+                                <button class="btn btn-secondary btn-small" id="resetResearchPrompt">Reset to default</button>
+                            </div>
+
+                            <div class="settings-actions">
+                                <button class="btn btn-primary" id="savePromptsBtn">Save prompts</button>
+                                <span class="settings-status" id="promptsStatus"></span>
+                            </div>
                         </div>
                     </div>
                 </div>

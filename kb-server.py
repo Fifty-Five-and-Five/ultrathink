@@ -545,6 +545,344 @@ def search_github(query, github_token, org=None, repos=None, max_results=10):
     return results
 
 
+def search_notion(query, notion_token, max_results=10):
+    """
+    Search Notion pages shared with the integration.
+
+    Args:
+        query: Search query string
+        notion_token: Notion internal integration token
+        max_results: Maximum results to return
+
+    Returns:
+        dict with success, results, and optional error
+    """
+    if not notion_token:
+        return {'success': False, 'error': 'Notion token not configured'}
+
+    if not query or not query.strip():
+        return {'success': False, 'error': 'Search query is empty'}
+
+    headers = {
+        'Authorization': f'Bearer {notion_token}',
+        'Notion-Version': '2022-06-28',
+        'Content-Type': 'application/json'
+    }
+
+    results = {
+        'success': True,
+        'pages': [],
+        'databases': [],
+        'query': query
+    }
+
+    try:
+        # POST to /v1/search
+        search_url = 'https://api.notion.com/v1/search'
+        request_body = json.dumps({
+            'query': query.strip(),
+            'page_size': max_results
+        }).encode('utf-8')
+
+        req = urllib.request.Request(search_url, data=request_body, headers=headers, method='POST')
+
+        with urllib.request.urlopen(req, timeout=30) as response:
+            data = json.loads(response.read().decode('utf-8'))
+
+        for item in data.get('results', []):
+            obj_type = item.get('object')  # 'page' or 'database'
+
+            # Extract title based on type
+            title = ''
+            if obj_type == 'page':
+                # Page title is in properties.title or properties.Name
+                props = item.get('properties', {})
+                for prop_name, prop_value in props.items():
+                    if prop_value.get('type') == 'title':
+                        title_arr = prop_value.get('title', [])
+                        if title_arr:
+                            title = title_arr[0].get('plain_text', '')
+                        break
+                # Fallback: check parent for database name
+                if not title:
+                    parent = item.get('parent', {})
+                    if parent.get('type') == 'database_id':
+                        title = '(Untitled page)'
+            elif obj_type == 'database':
+                title_arr = item.get('title', [])
+                if title_arr:
+                    title = title_arr[0].get('plain_text', '')
+
+            icon_data = item.get('icon') or {}
+            entry = {
+                'id': item.get('id'),
+                'title': title or '(Untitled)',
+                'url': item.get('url'),
+                'last_edited': item.get('last_edited_time'),
+                'icon': icon_data.get('emoji') if icon_data.get('type') == 'emoji' else None
+            }
+
+            if obj_type == 'page':
+                results['pages'].append(entry)
+            elif obj_type == 'database':
+                results['databases'].append(entry)
+
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode('utf-8') if e.fp else ''
+        print(f'Notion search error: {e.code} {e.reason} - {error_body}')
+        return {'success': False, 'error': f'Notion API error: {e.code} {e.reason}'}
+    except Exception as e:
+        print(f'Notion search error: {e}')
+        return {'success': False, 'error': str(e)}
+
+    return results
+
+
+def search_fastmail(query, fastmail_token, max_results=10):
+    """
+    Search Fastmail emails using JMAP protocol.
+
+    Args:
+        query: Search query string
+        fastmail_token: Fastmail API token
+        max_results: Maximum number of results to return
+
+    Returns:
+        dict with success status and emails list
+    """
+    if not fastmail_token:
+        return {'success': False, 'error': 'Fastmail token not configured'}
+
+    if not query.strip():
+        return {'success': False, 'error': 'Search query is required'}
+
+    headers = {
+        'Authorization': f'Bearer {fastmail_token}',
+        'Content-Type': 'application/json'
+    }
+
+    try:
+        # Step 1: Get session info to find API URL and account ID
+        session_req = urllib.request.Request(
+            'https://api.fastmail.com/jmap/session',
+            headers=headers,
+            method='GET'
+        )
+
+        with urllib.request.urlopen(session_req, timeout=30) as response:
+            session = json.loads(response.read().decode('utf-8'))
+
+        api_url = session.get('apiUrl')
+        accounts = session.get('primaryAccounts', {})
+        account_id = accounts.get('urn:ietf:params:jmap:mail')
+
+        if not api_url or not account_id:
+            return {'success': False, 'error': 'Could not get Fastmail session info'}
+
+        # Step 2: JMAP request with Email/query + Email/get
+        jmap_request = {
+            'using': ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+            'methodCalls': [
+                ['Email/query', {
+                    'accountId': account_id,
+                    'filter': {'text': query},
+                    'sort': [{'property': 'receivedAt', 'isAscending': False}],
+                    'limit': max_results
+                }, '0'],
+                ['Email/get', {
+                    'accountId': account_id,
+                    '#ids': {'resultOf': '0', 'name': 'Email/query', 'path': '/ids'},
+                    'properties': [
+                        'subject', 'from', 'to', 'cc', 'receivedAt',
+                        'preview', 'hasAttachment', 'attachments'
+                    ]
+                }, '1']
+            ]
+        }
+
+        jmap_req = urllib.request.Request(
+            api_url,
+            data=json.dumps(jmap_request).encode('utf-8'),
+            headers=headers,
+            method='POST'
+        )
+
+        with urllib.request.urlopen(jmap_req, timeout=30) as response:
+            data = json.loads(response.read().decode('utf-8'))
+
+        emails = []
+        for method_response in data.get('methodResponses', []):
+            if method_response[0] == 'Email/get':
+                for email in method_response[1].get('list', []):
+                    emails.append({
+                        'id': email.get('id'),
+                        'subject': email.get('subject', '(No subject)'),
+                        'from': email.get('from', []),
+                        'to': email.get('to', []),
+                        'cc': email.get('cc', []),
+                        'date': email.get('receivedAt'),
+                        'preview': email.get('preview', ''),
+                        'hasAttachment': email.get('hasAttachment', False),
+                        'attachments': len(email.get('attachments') or [])
+                    })
+
+        return {'success': True, 'emails': emails, 'query': query}
+
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode('utf-8') if e.fp else ''
+        print(f'Fastmail search error: {e.code} {e.reason} - {error_body}')
+        return {'success': False, 'error': f'Fastmail API error: {e.code} {e.reason}'}
+    except Exception as e:
+        print(f'Fastmail search error: {e}')
+        return {'success': False, 'error': str(e)}
+
+
+def search_capsule(query, capsule_token, max_results=10):
+    """
+    Search Capsule CRM for parties, opportunities, tasks, and projects.
+
+    Args:
+        query: Search query string
+        capsule_token: Capsule CRM API token
+        max_results: Maximum number of results to return
+
+    Returns:
+        dict with success status and results for each entity type
+    """
+    if not capsule_token:
+        return {'success': False, 'error': 'Capsule token not configured'}
+
+    if not query.strip():
+        return {'success': False, 'error': 'Search query is empty'}
+
+    headers = {
+        'Authorization': f'Bearer {capsule_token}',
+        'Accept': 'application/json'
+    }
+
+    results = {
+        'success': True,
+        'parties': [],
+        'opportunities': [],
+        'tasks': [],
+        'projects': [],
+        'query': query
+    }
+
+    base_url = 'https://api.capsulecrm.com/api/v2'
+
+    # 1. Search Parties (contacts/organisations)
+    try:
+        parties_url = f'{base_url}/parties/search?q={urllib.parse.quote(query)}&perPage={max_results}'
+        req = urllib.request.Request(parties_url, headers=headers)
+
+        with urllib.request.urlopen(req, timeout=30) as response:
+            data = json.loads(response.read().decode('utf-8'))
+
+        for party in data.get('parties', [])[:max_results]:
+            # Build name based on type
+            if party.get('type') == 'person':
+                name = f"{party.get('firstName', '')} {party.get('lastName', '')}".strip()
+            else:
+                name = party.get('name', '')
+
+            # Get first email and phone if available
+            emails = party.get('emailAddresses', [])
+            phones = party.get('phoneNumbers', [])
+
+            results['parties'].append({
+                'id': party.get('id'),
+                'type': party.get('type'),
+                'name': name or '(Unnamed)',
+                'email': emails[0].get('address', '') if emails else '',
+                'phone': phones[0].get('number', '') if phones else '',
+                'url': f"https://app.capsulecrm.com/party/{party.get('id')}"
+            })
+    except urllib.error.HTTPError as e:
+        print(f'Capsule parties search error: {e.code} {e.reason}')
+    except Exception as e:
+        print(f'Capsule parties search error: {e}')
+
+    # 2. Search Opportunities
+    try:
+        opps_url = f'{base_url}/opportunities/search?q={urllib.parse.quote(query)}&perPage={max_results}'
+        req = urllib.request.Request(opps_url, headers=headers)
+
+        with urllib.request.urlopen(req, timeout=30) as response:
+            data = json.loads(response.read().decode('utf-8'))
+
+        for opp in data.get('opportunities', [])[:max_results]:
+            value_obj = opp.get('value') or {}
+            results['opportunities'].append({
+                'id': opp.get('id'),
+                'name': opp.get('name', ''),
+                'description': (opp.get('description') or '')[:200],
+                'value': value_obj.get('amount'),
+                'currency': value_obj.get('currency'),
+                'milestone': (opp.get('milestone') or {}).get('name', ''),
+                'party_name': (opp.get('party') or {}).get('name', ''),
+                'expected_close': opp.get('expectedCloseOn'),
+                'url': f"https://app.capsulecrm.com/opportunity/{opp.get('id')}"
+            })
+    except urllib.error.HTTPError as e:
+        print(f'Capsule opportunities search error: {e.code} {e.reason}')
+    except Exception as e:
+        print(f'Capsule opportunities search error: {e}')
+
+    # 3. List Tasks (no search endpoint - get open tasks and filter)
+    try:
+        tasks_url = f'{base_url}/tasks?perPage={max_results}&status=open&embed=party'
+        req = urllib.request.Request(tasks_url, headers=headers)
+
+        with urllib.request.urlopen(req, timeout=30) as response:
+            data = json.loads(response.read().decode('utf-8'))
+
+        query_lower = query.lower()
+        for task in data.get('tasks', []):
+            desc = task.get('description', '')
+            # Filter tasks by query in description
+            if query_lower in desc.lower():
+                results['tasks'].append({
+                    'id': task.get('id'),
+                    'description': desc,
+                    'status': task.get('status', ''),
+                    'due_on': task.get('dueOn'),
+                    'category': (task.get('category') or {}).get('name', ''),
+                    'party_name': (task.get('party') or {}).get('name', ''),
+                    'url': f"https://app.capsulecrm.com/task/{task.get('id')}"
+                })
+                if len(results['tasks']) >= max_results:
+                    break
+    except urllib.error.HTTPError as e:
+        print(f'Capsule tasks search error: {e.code} {e.reason}')
+    except Exception as e:
+        print(f'Capsule tasks search error: {e}')
+
+    # 4. Search Projects/Cases
+    try:
+        projects_url = f'{base_url}/kases/search?q={urllib.parse.quote(query)}&perPage={max_results}'
+        req = urllib.request.Request(projects_url, headers=headers)
+
+        with urllib.request.urlopen(req, timeout=30) as response:
+            data = json.loads(response.read().decode('utf-8'))
+
+        for proj in data.get('kases', [])[:max_results]:
+            results['projects'].append({
+                'id': proj.get('id'),
+                'name': proj.get('name', ''),
+                'description': (proj.get('description') or '')[:200],
+                'status': proj.get('status', ''),
+                'party_name': (proj.get('party') or {}).get('name', ''),
+                'url': f"https://app.capsulecrm.com/kase/{proj.get('id')}"
+            })
+    except urllib.error.HTTPError as e:
+        print(f'Capsule projects search error: {e.code} {e.reason}')
+    except Exception as e:
+        print(f'Capsule projects search error: {e}')
+
+    return results
+
+
 class KBHandler(http.server.BaseHTTPRequestHandler):
     """Custom HTTP handler for KB API and static file serving."""
 
@@ -638,6 +976,26 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
             else:
                 logs = API_LOGS[:limit]
             self.send_json(logs)
+
+        elif path == '/api/settings':
+            # Return settings from native-host/settings.json (masks sensitive tokens)
+            settings_file = PROJECT_FOLDER / 'native-host' / 'settings.json'
+            if settings_file.exists():
+                with open(settings_file, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+                # Mask tokens for display (same length as original, show last 4 chars)
+                masked = {}
+                for key, value in settings.items():
+                    if 'token' in key.lower() or 'key' in key.lower():
+                        if value and len(value) > 4:
+                            masked[key] = '•' * (len(value) - 4) + value[-4:]
+                        else:
+                            masked[key] = value
+                    else:
+                        masked[key] = value
+                self.send_json(masked)
+            else:
+                self.send_json({})
 
         elif path == '/api/kanban-columns':
             # Return kanban columns from kanban-columns.json
@@ -846,6 +1204,175 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
                 )
                 self.send_json({'success': False, 'error': str(e)}, 500)
 
+        elif parsed.path == '/api/search/notion':
+            # Search Notion pages and databases
+            try:
+                query = body.get('query', '').strip()
+                if not query:
+                    self.send_json({'success': False, 'error': 'Query required'}, 400)
+                    return
+
+                # Load settings from native-host/settings.json
+                settings_file = PROJECT_FOLDER / 'native-host' / 'settings.json'
+                if not settings_file.exists():
+                    self.send_json({'success': False, 'error': 'Settings file not found. Configure Notion token in native-host/settings.json'}, 400)
+                    return
+
+                with open(settings_file, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+
+                notion_token = settings.get('notion_token', '')
+
+                if not notion_token:
+                    self.send_json({'success': False, 'error': 'Notion token not configured. Add "notion_token" to native-host/settings.json'}, 400)
+                    return
+
+                max_results = body.get('maxResults', 10)
+
+                # Log the Notion API call
+                start_time = time.time()
+                result = search_notion(query, notion_token, max_results)
+                duration = int((time.time() - start_time) * 1000)
+
+                add_log(
+                    service='notion',
+                    action='search',
+                    status='success' if result.get('success') else 'error',
+                    details=f"Query: {query}",
+                    duration_ms=duration,
+                    request_data={'query': query, 'max_results': max_results},
+                    response_data={
+                        'pages': len(result.get('pages', [])),
+                        'databases': len(result.get('databases', [])),
+                        'error': result.get('error')
+                    }
+                )
+
+                self.send_json(result)
+            except Exception as e:
+                print(f'Notion search endpoint error: {e}')
+                add_log(
+                    service='notion',
+                    action='search',
+                    status='error',
+                    details=f"Exception: {str(e)}",
+                    request_data={'query': body.get('query', '')}
+                )
+                self.send_json({'success': False, 'error': str(e)}, 500)
+
+        elif parsed.path == '/api/search/fastmail':
+            # Search Fastmail emails using JMAP
+            try:
+                query = body.get('query', '').strip()
+                if not query:
+                    self.send_json({'success': False, 'error': 'Query required'}, 400)
+                    return
+
+                # Load settings from native-host/settings.json
+                settings_file = PROJECT_FOLDER / 'native-host' / 'settings.json'
+                if not settings_file.exists():
+                    self.send_json({'success': False, 'error': 'Settings file not found. Configure Fastmail token in native-host/settings.json'}, 400)
+                    return
+
+                with open(settings_file, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+
+                fastmail_token = settings.get('fastmail_token', '')
+
+                if not fastmail_token:
+                    self.send_json({'success': False, 'error': 'Fastmail token not configured. Add "fastmail_token" to native-host/settings.json'}, 400)
+                    return
+
+                max_results = body.get('maxResults', 10)
+
+                # Log the Fastmail API call
+                start_time = time.time()
+                result = search_fastmail(query, fastmail_token, max_results)
+                duration = int((time.time() - start_time) * 1000)
+
+                add_log(
+                    service='fastmail',
+                    action='search',
+                    status='success' if result.get('success') else 'error',
+                    details=f"Query: {query}",
+                    duration_ms=duration,
+                    request_data={'query': query, 'max_results': max_results},
+                    response_data={
+                        'emails': len(result.get('emails', [])),
+                        'error': result.get('error')
+                    }
+                )
+
+                self.send_json(result)
+            except Exception as e:
+                print(f'Fastmail search endpoint error: {e}')
+                add_log(
+                    service='fastmail',
+                    action='search',
+                    status='error',
+                    details=f"Exception: {str(e)}",
+                    request_data={'query': body.get('query', '')}
+                )
+                self.send_json({'success': False, 'error': str(e)}, 500)
+
+        elif parsed.path == '/api/search/capsule':
+            # Search Capsule CRM for parties, opportunities, tasks, and projects
+            try:
+                query = body.get('query', '').strip()
+                if not query:
+                    self.send_json({'success': False, 'error': 'Query required'}, 400)
+                    return
+
+                # Load settings from native-host/settings.json
+                settings_file = PROJECT_FOLDER / 'native-host' / 'settings.json'
+                if not settings_file.exists():
+                    self.send_json({'success': False, 'error': 'Settings file not found. Configure Capsule token in native-host/settings.json'}, 400)
+                    return
+
+                with open(settings_file, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+
+                capsule_token = settings.get('capsule_token', '')
+
+                if not capsule_token:
+                    self.send_json({'success': False, 'error': 'Capsule token not configured. Add "capsule_token" to native-host/settings.json'}, 400)
+                    return
+
+                max_results = body.get('maxResults', 10)
+
+                # Log the Capsule API call
+                start_time = time.time()
+                result = search_capsule(query, capsule_token, max_results)
+                duration = int((time.time() - start_time) * 1000)
+
+                add_log(
+                    service='capsule',
+                    action='search',
+                    status='success' if result.get('success') else 'error',
+                    details=f"Query: {query}",
+                    duration_ms=duration,
+                    request_data={'query': query, 'max_results': max_results},
+                    response_data={
+                        'parties': len(result.get('parties', [])),
+                        'opportunities': len(result.get('opportunities', [])),
+                        'tasks': len(result.get('tasks', [])),
+                        'projects': len(result.get('projects', [])),
+                        'error': result.get('error')
+                    }
+                )
+
+                self.send_json(result)
+            except Exception as e:
+                print(f'Capsule search endpoint error: {e}')
+                add_log(
+                    service='capsule',
+                    action='search',
+                    status='error',
+                    details=f"Exception: {str(e)}",
+                    request_data={'query': body.get('query', '')}
+                )
+                self.send_json({'success': False, 'error': str(e)}, 500)
+
         else:
             self.send_error(404, 'Not found')
 
@@ -917,6 +1444,32 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
             entities.sort()
             with open(entities_file, 'w', encoding='utf-8') as f:
                 json.dump({'entities': entities}, f, indent=2)
+            self.send_json({'success': True})
+
+        elif parsed.path == '/api/settings':
+            # Update settings in native-host/settings.json
+            # Only update fields that are provided and not masked
+            settings_file = PROJECT_FOLDER / 'native-host' / 'settings.json'
+
+            # Load existing settings
+            if settings_file.exists():
+                with open(settings_file, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+            else:
+                settings = {}
+
+            # Update only provided fields that aren't masked values
+            for key, value in body.items():
+                if value and not value.startswith('•'):
+                    settings[key] = value
+                elif value == '':
+                    # Empty string means clear the field
+                    settings[key] = ''
+
+            # Write updated settings
+            with open(settings_file, 'w', encoding='utf-8') as f:
+                json.dump(settings, f, indent=2)
+
             self.send_json({'success': True})
 
         else:
