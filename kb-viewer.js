@@ -11,60 +11,60 @@
  * @constant {Object<string, string>}
  */
 const ENTITY_COLORS = {
-    project: '#d1d5db',       // Light grey
-    task: '#d1d5db',          // Light grey
-    knowledge: '#d1d5db',     // Light grey
-    unclassified: '#d1d5db'   // Light grey
+    project: '#e0e7ff',       // Pastel indigo
+    task: '#fce7f3',          // Pastel pink
+    knowledge: '#d1fae5',     // Pastel green
+    unclassified: '#f3f4f6'   // Light grey
 };
 
 /**
- * Category badge color mappings (work/personal)
+ * Category badge color mappings (work/personal) - pastel versions
  * @constant {Object<string, string>}
  */
 const CATEGORY_COLORS = {
-    work: '#3b82f6',          // Blue
-    personal: '#10b981'       // Green
+    work: '#fed7aa',          // Pastel orange
+    personal: '#bbf7d0'       // Pastel green
 };
 
 /**
- * Type badge color mappings - clean, modern palette
+ * Type badge color mappings - stronger pastel palette with black text
  * @constant {Object<string, string>}
  */
 const TYPE_COLORS = {
     // Core types
-    link: '#6366f1',           // Indigo
-    snippet: '#ec4899',        // Pink
-    screenshot: '#8b5cf6',     // Violet
+    link: '#c7d2fe',           // Indigo
+    snippet: '#fbcfe8',        // Pink
+    screenshot: '#ddd6fe',     // Violet
 
     // Files & Documents
-    file: '#3b82f6',           // Bright blue
-    pdf: '#ef4444',            // Red
-    markdown: '#64748b',       // Slate
-    image: '#06b6d4',          // Cyan
+    file: '#bfdbfe',           // Blue
+    pdf: '#fecaca',            // Red
+    markdown: '#e2e8f0',       // Slate
+    image: '#a5f3fc',          // Cyan
 
     // Microsoft Office
-    'ms-word': '#2563eb',      // Blue
-    'ms-excel': '#16a34a',     // Green
-    'ms-powerpoint': '#ea580c', // Orange
-    'ms-onenote': '#7c3aed',   // Purple
+    'ms-word': '#bfdbfe',      // Blue
+    'ms-excel': '#bbf7d0',     // Green
+    'ms-powerpoint': '#fed7aa', // Orange
+    'ms-onenote': '#ddd6fe',   // Purple
 
     // AI Assistants
-    claude: '#f97316',         // Orange
-    chatgpt: '#059669',        // Emerald
-    perplexity: '#0ea5e9',     // Sky
+    claude: '#fed7aa',         // Orange
+    chatgpt: '#a7f3d0',        // Emerald
+    perplexity: '#bae6fd',     // Sky
 
     // Productivity
-    notion: '#374151',         // Gray
+    notion: '#e5e7eb',         // Gray
 
     // Media
-    video: '#dc2626',          // Red
-    audio: '#ec4899',          // Pink
+    video: '#fecaca',          // Red
+    audio: '#fbcfe8',          // Pink
 
     // Notes
-    idea: '#eab308',           // Yellow
-    para: '#14b8a6',           // Teal
-    'long-note': '#ffb627',    // Orange/Yellow
-    note: '#ffb627'            // Orange/Yellow
+    idea: '#fef08a',           // Yellow
+    para: '#99f6e4',           // Teal
+    'long-note': '#fde68a',    // Amber
+    note: '#fde68a'            // Amber
 };
 
 /**
@@ -86,19 +86,6 @@ const AppState = {
     kanbanColumns: [],
     /** @type {string} Current task view mode ('list' or 'kanban') */
     currentTaskView: 'list'
-};
-
-/**
- * AI polling state container - manages background polling for AI summaries
- * @namespace
- */
-const AiPollingState = {
-    /** @type {number|null} Interval ID for polling */
-    interval: null,
-    /** @type {number|null} Timeout ID for max polling duration */
-    timeout: null,
-    /** @type {string|null} Timestamp of entry being polled */
-    timestamp: null
 };
 
 /**
@@ -137,12 +124,10 @@ let table = null;
 let allEntries = [];
 let allTopics = [];
 let allPeople = [];
-let currentPage = 'home';
-
-// AI polling state (legacy aliases)
-let aiPollInterval = null;
-let aiPollTimeout = null;
-let aiPollTimestamp = null;
+// Valid pages for hash routing
+const validPages = ['home', 'all', 'project', 'task', 'knowledge', 'visualise', 'search', 'topics', 'people', 'settings', 'logs'];
+// Initialize currentPage from URL hash immediately to avoid flash
+let currentPage = validPages.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'home';
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', async () => {
@@ -151,9 +136,73 @@ document.addEventListener('DOMContentLoaded', async () => {
     await loadPeople();
     setupEventListeners();
     setupNavigation();
-    setupModal();
     setupManagementPages();
+
+    // Navigate to page from URL hash (currentPage already set from hash at top of file)
+    navigateToPage(currentPage);
+
+    // Handle browser back/forward navigation
+    window.addEventListener('hashchange', () => {
+        const page = location.hash.slice(1);
+        if (validPages.includes(page) && page !== currentPage) {
+            navigateToPage(page);
+        }
+    });
+
+    // Start background refresh every 10 seconds
+    startBackgroundRefresh();
 });
+
+/** Background refresh interval ID */
+let backgroundRefreshInterval = null;
+
+/**
+ * Start background refresh of entries every 10 seconds
+ */
+function startBackgroundRefresh() {
+    if (backgroundRefreshInterval) return;
+    backgroundRefreshInterval = setInterval(refreshEntries, 10000);
+}
+
+/**
+ * Silently refresh entries from API without full page reload
+ */
+async function refreshEntries() {
+    try {
+        const response = await fetch('/api/entries');
+        if (!response.ok) return;
+
+        const newEntries = await response.json();
+
+        // Only update if data changed
+        if (JSON.stringify(newEntries) === JSON.stringify(allEntries)) return;
+
+        allEntries = newEntries;
+
+        // Update table if it exists
+        if (table) {
+            table.replaceData(allEntries);
+            applyFilters();
+        }
+
+        // Update counts
+        updateEntryCount(allEntries.length);
+        updateNavBadgeCounts();
+
+        // Update dashboard if visible
+        if (currentPage === 'home') {
+            updateDashboard();
+        }
+
+        // Update kanban if on task page
+        if (currentPage === 'task') {
+            renderKanbanBoard();
+        }
+    } catch (error) {
+        // Silently fail - don't interrupt user
+        console.debug('Background refresh failed:', error);
+    }
+}
 
 /**
  * Fetch entries from API and initialize table
@@ -167,9 +216,9 @@ async function loadEntries() {
         initTable(allEntries);
         populateFilters(allEntries);
         updateEntryCount(allEntries.length);
+        updateNavBadgeCounts();
     } catch (error) {
         console.error('Failed to load entries:', error);
-        document.getElementById('entryCount').textContent = 'Error loading entries';
         showStatus('Failed to load entries: ' + error.message, 'error');
     }
 }
@@ -179,7 +228,6 @@ async function loadEntries() {
  */
 function populateFilters(entries) {
     const types = [...new Set(entries.map(e => e.type).filter(Boolean))].sort();
-    const sources = [...new Set(entries.map(e => e.source).filter(Boolean))].sort();
     const entities = [...new Set(entries.map(e => e.entity).filter(Boolean))].sort();
 
     const typeSelect = document.getElementById('filterType');
@@ -188,14 +236,6 @@ function populateFilters(entries) {
         opt.value = type;
         opt.textContent = type;
         typeSelect.appendChild(opt);
-    });
-
-    const sourceSelect = document.getElementById('filterSource');
-    sources.forEach(source => {
-        const opt = document.createElement('option');
-        opt.value = source;
-        opt.textContent = source;
-        sourceSelect.appendChild(opt);
     });
 
     const entitySelect = document.getElementById('filterEntity');
@@ -224,7 +264,24 @@ function initTable(entries) {
         selectable: true,
         placeholder: "No entries found",
         height: "calc(100vh - 180px)",
+        rowFormatter: function(row) {
+            const data = row.getData();
+            // Grey out completed tasks
+            if (data.entity === 'task' && data.taskStatus === 'done') {
+                row.getElement().classList.add('completed-task-row');
+            } else {
+                row.getElement().classList.remove('completed-task-row');
+            }
+        },
         columns: [
+            {
+                title: "#",
+                formatter: "rownum",
+                hozAlign: "center",
+                headerSort: false,
+                width: 40,
+                cssClass: "row-num-cell"
+            },
             {
                 formatter: "rowSelection",
                 titleFormatter: "rowSelection",
@@ -236,7 +293,7 @@ function initTable(entries) {
                 title: "Title",
                 field: "title",
                 formatter: titleFormatter,
-                widthGrow: 1.6
+                widthGrow: 2.5
             },
             {
                 title: "Type",
@@ -248,7 +305,7 @@ function initTable(entries) {
                 title: "Notes",
                 field: "content",
                 formatter: contentFormatter,
-                widthGrow: 2
+                widthGrow: 3
             },
             {
                 title: "Entity",
@@ -260,32 +317,34 @@ function initTable(entries) {
                 title: "Category",
                 field: "category",
                 formatter: categoryBadgeFormatter,
-                width: 90
+                width: 90,
+                visible: false  // Hidden by default, shown on Tasks page
+            },
+            {
+                title: "Status",
+                field: "taskStatus",
+                formatter: taskStatusFormatter,
+                width: 100,
+                visible: false  // Hidden by default, shown on Tasks page
             },
             {
                 title: "Topics",
                 field: "topics",
                 formatter: topicsFormatter,
-                widthGrow: 1
+                widthGrow: 2
             },
             {
                 title: "People",
                 field: "people",
                 formatter: peopleFormatter,
-                widthGrow: 1
-            },
-            {
-                title: "Source",
-                field: "source",
-                formatter: sourceFormatter,
-                width: 100
+                widthGrow: 2
             },
             {
                 title: "Date",
                 field: "timestamp",
                 formatter: dateFormatter,
                 sorter: "string",
-                width: 150
+                width: 130
             },
             {
                 title: "",
@@ -360,8 +419,11 @@ function dateFormatter(cell) {
     try {
         const date = new Date(timestamp.replace(' ', 'T'));
         const now = new Date();
-        const diffMs = now - date;
-        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+        // Compare calendar dates (not 24-hour periods)
+        const dateOnly = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+        const todayOnly = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const diffDays = Math.round((todayOnly - dateOnly) / (1000 * 60 * 60 * 24));
 
         // Format time
         const timeStr = date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
@@ -449,6 +511,98 @@ function categoryBadgeFormatter(cell) {
 }
 
 /**
+ * Custom formatter for task status badge
+ */
+const TASK_STATUS_COLORS = {
+    'not-started': '#6b7280',
+    'in-progress': '#3b82f6',
+    'done': '#22c55e'
+};
+
+const TASK_STATUS_LABELS = {
+    'not-started': 'Not started',
+    'in-progress': 'In progress',
+    'done': 'Done'
+};
+
+function taskStatusFormatter(cell) {
+    const data = cell.getRow().getData();
+    // Only show for task entities
+    if (data.entity !== 'task') return '';
+
+    const status = cell.getValue() || 'not-started';
+    const color = TASK_STATUS_COLORS[status] || '#6b7280';
+    const label = TASK_STATUS_LABELS[status] || status;
+    return `<span class="type-badge status-clickable" style="background-color:${color};cursor:pointer" onclick="event.stopPropagation(); cycleTaskStatus('${escapeHtml(data.timestamp)}')" title="Click to change status">${escapeHtml(label)}</span>`;
+}
+
+/**
+ * Cycle task status through: not-started -> in-progress -> done -> not-started
+ */
+async function cycleTaskStatus(timestamp) {
+    const entry = allEntries.find(e => e.timestamp === timestamp);
+    if (!entry) return;
+
+    const currentStatus = entry.taskStatus || 'not-started';
+    const statusOrder = ['not-started', 'in-progress', 'done'];
+    const currentIndex = statusOrder.indexOf(currentStatus);
+    const nextStatus = statusOrder[(currentIndex + 1) % statusOrder.length];
+
+    await updateTaskStatus(timestamp, nextStatus);
+}
+
+/**
+ * Update task status via API
+ */
+async function updateTaskStatus(timestamp, newStatus) {
+    try {
+        const response = await fetch('/api/entries', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ timestamp, taskStatus: newStatus })
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            // Update local entry
+            const entry = allEntries.find(e => e.timestamp === timestamp);
+            if (entry) {
+                entry.taskStatus = newStatus;
+            }
+
+            // Re-render based on current view
+            if (table) {
+                table.replaceData(allEntries);
+                applyFilters();
+            }
+            if (currentPage === 'task') {
+                renderKanbanBoard();
+            }
+
+            // Show toast if task completed and hide completed is on
+            if (hideCompletedTasks && newStatus === 'done') {
+                const completedCount = allEntries.filter(e => e.entity === 'task' && e.taskStatus === 'done').length;
+                showStatus(`Task completed (${completedCount} hidden)`, 'success');
+            } else {
+                showStatus('Status updated', 'success');
+            }
+
+            // Update detail panel if open
+            if (currentDetailEntry && currentDetailEntry.timestamp === timestamp) {
+                currentDetailEntry.taskStatus = newStatus;
+                const select = document.getElementById('detailStatusSelect');
+                if (select) select.value = newStatus;
+            }
+        } else {
+            showStatus(result.error || 'Failed to update status', 'error');
+        }
+    } catch (error) {
+        console.error('Failed to update task status:', error);
+        showStatus('Failed to update status', 'error');
+    }
+}
+
+/**
  * Custom formatter for topics (tags) - click to visualise
  */
 function topicsFormatter(cell) {
@@ -505,376 +659,6 @@ function navigateToVisualise(filterType, filterValue) {
 function actionsFormatter(cell) {
     const timestamp = cell.getRow().getData().timestamp;
     return `<button class="delete-btn" onclick="event.stopPropagation(); deleteEntry('${escapeHtml(timestamp)}')" title="Delete entry">&times;</button>`;
-}
-
-/**
- * Open modal with entry details
- * Order: My Notes -> Content (file/video/image/etc) -> AI Summary -> Status bar
- */
-function openModal(entry) {
-    const overlay = document.getElementById('modalOverlay');
-    const titleEl = document.getElementById('modalTitle');
-    const bodyEl = document.getElementById('modalBody');
-
-    // Set title
-    if (entry.url) {
-        titleEl.innerHTML = `<a href="${escapeHtml(entry.url)}" target="_blank">${escapeHtml(entry.title) || '(untitled)'}</a>`;
-    } else {
-        titleEl.textContent = entry.title || '(untitled)';
-    }
-
-    let bodyHtml = '';
-
-    // 0. SNIPPET (selected text from page) - first if present
-    if (entry.selectedText) {
-        bodyHtml += `
-            <div class="modal-section modal-snippet-section">
-                <button class="modal-copy-btn" onclick="copyToClipboard(this, 'snippet')" title="Copy to clipboard">
-                    <svg width="16" height="16" viewBox="0 0 256 256" fill="currentColor">
-                        <path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/>
-                    </svg>
-                </button>
-                <h4>SNIPPET</h4>
-                <div class="modal-snippet-text">${escapeHtml(entry.selectedText)}</div>
-            </div>
-        `;
-    }
-
-    // 1. MY NOTES (user's notes)
-    if (entry.content) {
-        bodyHtml += `
-            <div class="modal-section modal-notes-section">
-                <button class="modal-copy-btn" onclick="copyToClipboard(this, 'notes')" title="Copy to clipboard">
-                    <svg width="16" height="16" viewBox="0 0 256 256" fill="currentColor">
-                        <path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/>
-                    </svg>
-                </button>
-                <h4>MY NOTES</h4>
-                <div class="modal-notes-text">${renderMarkdown(entry.content)}</div>
-            </div>
-        `;
-    }
-
-    // 2. AI SUMMARY - aiSummary field (light yellow panel, directly after MY NOTES)
-    // Show spinner if no AI Summary yet (AI processing in progress)
-    const NO_SUMMARY_TYPES = ['video'];  // Types that don't get AI summaries
-    const shouldHaveAiSummary = !NO_SUMMARY_TYPES.includes(entry.type);
-
-    if (entry.aiSummary) {
-        bodyHtml += `
-            <div class="modal-section modal-ai-section">
-                <button class="modal-copy-btn" onclick="copyToClipboard(this, 'ai')" title="Copy to clipboard">
-                    <svg width="16" height="16" viewBox="0 0 256 256" fill="currentColor">
-                        <path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/>
-                    </svg>
-                </button>
-                <h4>AI SUMMARY</h4>
-                <div class="modal-ai-text">${escapeHtml(entry.aiSummary)}</div>
-            </div>
-        `;
-    } else if (shouldHaveAiSummary) {
-        // Show spinner for entries that should have AI summary but don't yet
-        bodyHtml += `
-            <div class="modal-section modal-ai-section">
-                <h4>AI SUMMARY <span class="ai-processing-spinner" title="AI processing in progress..."></span></h4>
-                <div class="modal-ai-text"></div>
-            </div>
-        `;
-    }
-
-    // 3. CONTENT - file/screenshot/video/audio/text preview (after AI summary)
-    if (entry.screenshot) {
-        bodyHtml += `
-            <div class="modal-section modal-file-section">
-                <img src="/${escapeHtml(entry.screenshot)}" class="modal-screenshot"
-                     onclick="window.open('/${escapeHtml(entry.screenshot)}', '_blank')"
-                     title="Click to view full size">
-            </div>
-        `;
-    }
-
-    if (entry.file) {
-        const fileName = entry.file.split('/').pop();
-        const ext = fileName.split('.').pop().toLowerCase();
-        const filePath = `/${escapeHtml(entry.file)}`;
-
-        // Audio files
-        const audioExts = ['wav', 'mp3', 'ogg', 'flac', 'aac', 'm4a'];
-        // Video files
-        const videoExts = ['mp4', 'webm', 'ogv', 'mov', 'avi'];
-        // Image files
-        const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'];
-        // Text/code files for inline preview
-        const textExts = ['txt', 'md', 'js', 'ts', 'jsx', 'tsx', 'py', 'css', 'html', 'json', 'xml', 'yaml', 'yml', 'sh', 'bash', 'sql', 'csv', 'log', 'ini', 'cfg', 'conf', 'env', 'gitignore', 'dockerfile'];
-        // PDF
-        const isPdf = ext === 'pdf';
-
-        if (audioExts.includes(ext)) {
-            bodyHtml += `
-                <div class="modal-section modal-file-section">
-                    <audio controls class="modal-audio">
-                        <source src="${filePath}" type="audio/${ext === 'mp3' ? 'mpeg' : ext}">
-                        Your browser does not support audio playback.
-                    </audio>
-                </div>
-            `;
-        } else if (videoExts.includes(ext)) {
-            bodyHtml += `
-                <div class="modal-section modal-file-section">
-                    <video controls class="modal-video">
-                        <source src="${filePath}" type="video/${ext === 'mov' ? 'quicktime' : ext}">
-                        Your browser does not support video playback.
-                    </video>
-                </div>
-            `;
-        } else if (imageExts.includes(ext)) {
-            bodyHtml += `
-                <div class="modal-section modal-file-section">
-                    <img src="${filePath}" class="modal-screenshot"
-                         onclick="window.open('${filePath}', '_blank')"
-                         title="Click to view full size">
-                </div>
-            `;
-        } else if (isPdf) {
-            bodyHtml += `
-                <div class="modal-section modal-file-section">
-                    <iframe src="${filePath}" class="modal-pdf-viewer"></iframe>
-                </div>
-            `;
-        } else if (textExts.includes(ext)) {
-            // Text/code file - load inline
-            bodyHtml += `
-                <div class="modal-section modal-file-section">
-                    <pre class="modal-code-preview" data-file="${filePath}">Loading...</pre>
-                </div>
-            `;
-        }
-        // For other file types, title is already a link - no extra section needed
-    }
-
-    // 4. PAGE INFO - description and page metadata (always show if present)
-    const hasPageInfo = entry.description || entry.ogImage || entry.author || entry.publishedDate || entry.readingTime;
-    if (hasPageInfo) {
-        bodyHtml += `<div class="modal-section modal-page-info">`;
-        bodyHtml += `<h4>PAGE INFO</h4>`;
-
-        if (entry.ogImage) {
-            bodyHtml += `
-                <div class="modal-og-image">
-                    <img src="${escapeHtml(entry.ogImage)}" alt="Preview"
-                         onerror="this.parentElement.style.display='none'"
-                         onclick="window.open('${escapeHtml(entry.ogImage)}', '_blank')">
-                </div>
-            `;
-        }
-
-        if (entry.description) {
-            bodyHtml += `<div class="modal-page-desc">${escapeHtml(entry.description)}</div>`;
-        }
-
-        // Small metadata row
-        const metaParts = [];
-        if (entry.author) metaParts.push(`Author: ${escapeHtml(entry.author)}`);
-        if (entry.publishedDate) metaParts.push(`Published: ${escapeHtml(entry.publishedDate)}`);
-        if (entry.readingTime && entry.readingTime > 0) metaParts.push(`~${entry.readingTime} min read`);
-        if (metaParts.length > 0) {
-            bodyHtml += `<div class="modal-page-meta">${metaParts.join(' • ')}</div>`;
-        }
-
-        bodyHtml += `</div>`;
-    }
-
-    // 4. STATUS BAR - tags row + meta row
-    const hasTags = (entry.topics && entry.topics.length > 0) || (entry.people && entry.people.length > 0);
-
-    bodyHtml += `<div class="modal-status-bar">`;
-
-    // Tags row (topics + people)
-    if (hasTags) {
-        bodyHtml += `<div class="modal-status-tags">`;
-        if (entry.topics && Array.isArray(entry.topics)) {
-            bodyHtml += entry.topics.map(t => `<span class="topic-tag">${escapeHtml(t)}</span>`).join('');
-        }
-        if (entry.people && Array.isArray(entry.people)) {
-            bodyHtml += entry.people.map(p => `<span class="person-tag">${escapeHtml(p)}</span>`).join('');
-        }
-        bodyHtml += `</div>`;
-    }
-
-    // Meta row (entity, type, source, date)
-    bodyHtml += `
-        <div class="modal-status-meta">
-            ${entry.entity ? `<span class="entity-badge" style="background:${ENTITY_COLORS[entry.entity] || ENTITY_COLORS.unclassified}">${escapeHtml(entry.entity)}</span>` : ''}
-            <span class="type-badge" style="background:${TYPE_COLORS[entry.type] || '#64748b'}">${escapeHtml(entry.type)}</span>
-            <span class="modal-status-item">captured from ${escapeHtml(entry.source)} at ${escapeHtml(entry.timestamp)}</span>
-        </div>
-    </div>
-    `;
-
-    bodyEl.innerHTML = bodyHtml;
-    overlay.classList.add('active');
-
-    // Load text file content if needed
-    const codePreview = bodyEl.querySelector('.modal-code-preview');
-    if (codePreview) {
-        const filePath = codePreview.dataset.file;
-        fetch(filePath)
-            .then(r => r.text())
-            .then(text => {
-                // Limit to first 200 lines
-                const lines = text.split('\n');
-                const preview = lines.slice(0, 200).join('\n');
-                codePreview.textContent = preview + (lines.length > 200 ? '\n\n... (' + (lines.length - 200) + ' more lines)' : '');
-            })
-            .catch(() => {
-                codePreview.textContent = 'Failed to load file';
-            });
-    }
-
-    // Start polling for AI summary if entry doesn't have one yet
-    if (!entry.aiSummary && shouldHaveAiSummary) {
-        startAiPolling(entry.timestamp);
-    }
-}
-
-/**
- * Close modal
- */
-function closeModal() {
-    stopAiPolling();
-    document.getElementById('modalOverlay').classList.remove('active');
-}
-
-/**
- * Start polling for AI processing updates
- * @param {string} timestamp - The entry timestamp to poll for
- */
-function startAiPolling(timestamp) {
-    aiPollTimestamp = timestamp;
-
-    // Poll every 5 seconds
-    aiPollInterval = setInterval(async () => {
-        try {
-            const response = await fetch(`/api/entries/${encodeURIComponent(timestamp)}`);
-            if (!response.ok) return;
-
-            const entry = await response.json();
-            if (entry && entry.aiSummary) {
-                stopAiPolling();
-                updateModalAiSummary(entry.aiSummary);
-                // Update local entry data
-                const localEntry = allEntries.find(e => e.timestamp === timestamp);
-                if (localEntry) {
-                    localEntry.aiSummary = entry.aiSummary;
-                    // Also update entity, topics, people if they changed
-                    if (entry.entity) localEntry.entity = entry.entity;
-                    if (entry.topics) localEntry.topics = entry.topics;
-                    if (entry.people) localEntry.people = entry.people;
-                }
-            }
-        } catch (error) {
-            console.error('AI polling error:', error);
-        }
-    }, 5000);
-
-    // Stop after 2 minutes
-    aiPollTimeout = setTimeout(() => {
-        stopAiPolling();
-        removeAiSpinner();
-    }, 120000);
-}
-
-/**
- * Stop AI polling
- */
-function stopAiPolling() {
-    if (aiPollInterval) {
-        clearInterval(aiPollInterval);
-        aiPollInterval = null;
-    }
-    if (aiPollTimeout) {
-        clearTimeout(aiPollTimeout);
-        aiPollTimeout = null;
-    }
-    aiPollTimestamp = null;
-}
-
-/**
- * Update modal AI summary section with new content
- * @param {string} summary - The AI summary text
- */
-function updateModalAiSummary(summary) {
-    const modalBody = document.getElementById('modalBody');
-    const existingSection = modalBody.querySelector('.modal-ai-section');
-
-    if (existingSection) {
-        // Update existing section - remove spinner and update text
-        const spinner = existingSection.querySelector('.ai-processing-spinner');
-        if (spinner) spinner.remove();
-        const textEl = existingSection.querySelector('.modal-ai-text');
-        if (textEl) {
-            textEl.textContent = summary;
-        }
-    } else {
-        // Create new AI section - insert after MY NOTES or SNIPPET
-        const notesSection = modalBody.querySelector('.modal-notes-section');
-        const snippetSection = modalBody.querySelector('.modal-snippet-section');
-        const insertAfter = notesSection || snippetSection;
-
-        const aiSection = document.createElement('div');
-        aiSection.className = 'modal-section modal-ai-section';
-        aiSection.innerHTML = `
-            <button class="modal-copy-btn" onclick="copyToClipboard(this, 'ai')" title="Copy to clipboard">
-                <svg width="16" height="16" viewBox="0 0 256 256" fill="currentColor">
-                    <path d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/>
-                </svg>
-            </button>
-            <h4>AI SUMMARY</h4>
-            <div class="modal-ai-text">${escapeHtml(summary)}</div>
-        `;
-
-        if (insertAfter) {
-            insertAfter.insertAdjacentElement('afterend', aiSection);
-        } else {
-            // Insert at beginning of modal body
-            modalBody.insertBefore(aiSection, modalBody.firstChild);
-        }
-    }
-}
-
-/**
- * Remove spinner without adding content (on timeout)
- */
-function removeAiSpinner() {
-    const modalBody = document.getElementById('modalBody');
-    const aiSection = modalBody.querySelector('.modal-ai-section');
-    if (aiSection) {
-        const spinner = aiSection.querySelector('.ai-processing-spinner');
-        if (spinner) {
-            spinner.remove();
-        }
-        // If no text in AI section, update with placeholder
-        const textEl = aiSection.querySelector('.modal-ai-text');
-        if (textEl && !textEl.textContent.trim()) {
-            textEl.textContent = '(Processing timed out)';
-        }
-    }
-}
-
-/**
- * Setup modal event listeners
- */
-function setupModal() {
-    document.getElementById('modalClose').addEventListener('click', closeModal);
-    document.getElementById('modalOverlay').addEventListener('click', (e) => {
-        if (e.target.id === 'modalOverlay') {
-            closeModal();
-        }
-    });
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') closeModal();
-    });
-
 }
 
 /**
@@ -962,23 +746,28 @@ async function deleteSelected() {
  */
 function applyFilters() {
     const typeFilter = document.getElementById('filterType').value;
-    const sourceFilter = document.getElementById('filterSource').value;
     const entityFilter = document.getElementById('filterEntity')?.value || '';
-    const categoryFilter = document.getElementById('filterCategory')?.value || '';
     const searchValue = document.getElementById('search').value.toLowerCase();
 
     table.setFilter(function(data) {
         // Type filter
         if (typeFilter && data.type !== typeFilter) return false;
 
-        // Source filter
-        if (sourceFilter && data.source !== sourceFilter) return false;
-
         // Entity filter
         if (entityFilter && data.entity !== entityFilter) return false;
 
-        // Category filter
-        if (categoryFilter && data.category !== categoryFilter) return false;
+        // Category filter (from toggle buttons)
+        if (globalCategoryFilter && data.category !== globalCategoryFilter) return false;
+
+        // Task-specific filters (only apply when viewing tasks)
+        if (currentPage === 'task' && data.entity === 'task') {
+            // Work/personal category filter
+            if (taskCategoryFilter !== 'all') {
+                if (data.category !== taskCategoryFilter) return false;
+            }
+            // Hide completed tasks filter
+            if (hideCompletedTasks && data.taskStatus === 'done') return false;
+        }
 
         // Search filter
         if (searchValue) {
@@ -1020,37 +809,115 @@ function setupEventListeners() {
     // Type filter
     document.getElementById('filterType').addEventListener('change', applyFilters);
 
-    // Source filter
-    document.getElementById('filterSource').addEventListener('change', applyFilters);
-
     // Entity filter
     const entityFilter = document.getElementById('filterEntity');
     if (entityFilter) {
         entityFilter.addEventListener('change', applyFilters);
     }
 
-    // Category filter
-    const categoryFilter = document.getElementById('filterCategory');
-    if (categoryFilter) {
-        categoryFilter.addEventListener('change', applyFilters);
-    }
+    // Category toggle buttons (replaces dropdown)
+    document.querySelectorAll('#categoryToggle .cat-toggle-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            // Update active state
+            document.querySelectorAll('#categoryToggle .cat-toggle-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            // Update filter value
+            globalCategoryFilter = btn.dataset.category || '';
+            // Apply filters
+            applyFilters();
+        });
+    });
 
     // Refresh button
     document.getElementById('refreshBtn').addEventListener('click', async () => {
-        document.getElementById('entryCount').textContent = 'Loading...';
         await loadEntries();
         showStatus('Refreshed', 'success');
     });
 
     // Delete selected button
     document.getElementById('deleteSelected').addEventListener('click', deleteSelected);
+
+    // Hide completed tasks button (eye icon)
+    const hideCompletedBtn = document.getElementById('hideCompletedBtn');
+    if (hideCompletedBtn) {
+        hideCompletedBtn.addEventListener('click', () => {
+            hideCompletedTasks = !hideCompletedTasks;
+            // Update button appearance
+            if (hideCompletedTasks) {
+                hideCompletedBtn.classList.add('active');
+                hideCompletedBtn.title = 'Show completed';
+                // Change to eye-off icon
+                hideCompletedBtn.innerHTML = `
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                        <line x1="1" y1="1" x2="23" y2="23"/>
+                    </svg>`;
+            } else {
+                hideCompletedBtn.classList.remove('active');
+                hideCompletedBtn.title = 'Hide completed';
+                // Change back to eye icon
+                hideCompletedBtn.innerHTML = `
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                        <circle cx="12" cy="12" r="3"/>
+                    </svg>`;
+            }
+            applyFilters();
+            renderKanbanBoard();
+        });
+    }
+
+    // View toggle (list/board)
+    document.querySelectorAll('#viewToggle .cat-toggle-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const view = btn.dataset.view;
+            if (!view) return;
+
+            // Update active state
+            document.querySelectorAll('#viewToggle .cat-toggle-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+
+            currentTaskView = view;
+
+            if (view === 'kanban') {
+                document.getElementById('gridContainer').style.display = 'none';
+                document.getElementById('kanbanContainer').classList.add('active');
+                renderKanbanBoard();
+            } else {
+                document.getElementById('kanbanContainer').classList.remove('active');
+                document.getElementById('gridContainer').style.display = 'block';
+                if (table) requestAnimationFrame(() => requestAnimationFrame(() => table.redraw(true)));
+            }
+        });
+    });
 }
 
 /**
  * Update entry count display
  */
 function updateEntryCount(count) {
-    document.getElementById('entryCount').textContent = `${count} entries`;
+    const el = document.getElementById('entryCount');
+    if (el) el.textContent = `${count} entries`;
+}
+
+/**
+ * Update nav badge counts for entity sections
+ */
+function updateNavBadgeCounts() {
+    const allCount = allEntries.length;
+    const projectCount = allEntries.filter(e => e.entity === 'project').length;
+    const taskCount = allEntries.filter(e => e.entity === 'task').length;
+    const knowledgeCount = allEntries.filter(e => e.entity === 'knowledge').length;
+
+    const allEl = document.getElementById('allCount');
+    const projectEl = document.getElementById('projectCount');
+    const taskEl = document.getElementById('taskCount');
+    const knowledgeEl = document.getElementById('knowledgeCount');
+
+    if (allEl) allEl.textContent = allCount;
+    if (projectEl) projectEl.textContent = projectCount;
+    if (taskEl) taskEl.textContent = taskCount;
+    if (knowledgeEl) knowledgeEl.textContent = knowledgeCount;
 }
 
 /**
@@ -1182,6 +1049,11 @@ function setupNavigation() {
 function navigateToPage(page, filterContext = null) {
     currentPage = page;
 
+    // Update URL hash for persistence across refresh
+    if (location.hash.slice(1) !== page) {
+        location.hash = page;
+    }
+
     // Update nav active state
     document.querySelectorAll('.nav-item').forEach(item => {
         item.classList.toggle('active', item.dataset.page === page);
@@ -1201,8 +1073,8 @@ function navigateToPage(page, filterContext = null) {
     // Stop logs polling when navigating away
     stopLogsPolling();
 
-    // Hide view toggle by default
-    document.getElementById('viewToggle').style.display = 'none';
+    // Hide task filters by default
+    document.getElementById('taskFilters').style.display = 'none';
 
     // Show appropriate content
     if (page === 'home') {
@@ -1217,6 +1089,9 @@ function navigateToPage(page, filterContext = null) {
     } else if (page === 'visualise') {
         document.getElementById('visualisePage').classList.add('active');
         initVisualisation(filterContext);
+    } else if (page === 'visualise2') {
+        document.getElementById('visualise2Page').classList.add('active');
+        initVisualise2();
     } else if (page === 'search') {
         document.getElementById('searchPage').classList.add('active');
         setupExternalSearch();
@@ -1226,17 +1101,27 @@ function navigateToPage(page, filterContext = null) {
     } else if (page === 'logs') {
         document.getElementById('logsPage').classList.add('active');
         initLogsPage();
+    } else if (page === 'all') {
+        // Show all entries (no entity filter)
+        document.querySelector('.toolbar').style.display = 'flex';
+        document.getElementById('filterEntity').value = '';
+        document.getElementById('filterEntity').style.display = 'block';  // Show entity filter on All page
+        document.getElementById('gridContainer').style.display = 'block';
+        applyFilters();
+        // Redraw table after layout settles
+        if (table) requestAnimationFrame(() => requestAnimationFrame(() => table.redraw(true)));
     } else {
         // Show toolbar for project, task, knowledge
         document.querySelector('.toolbar').style.display = 'flex';
+        document.getElementById('filterEntity').style.display = 'none';  // Hide entity filter on entity pages
 
         // Apply entity filter based on page
         if (page === 'project') {
             document.getElementById('filterEntity').value = 'project';
         } else if (page === 'task') {
             document.getElementById('filterEntity').value = 'task';
-            // Show view toggle for tasks page
-            document.getElementById('viewToggle').style.display = 'flex';
+            // Show task filters for tasks page
+            document.getElementById('taskFilters').style.display = 'flex';
             // Initialize kanban if needed
             if (kanbanColumns.length === 0) {
                 initKanban();
@@ -1251,9 +1136,31 @@ function navigateToPage(page, filterContext = null) {
             renderKanbanBoard();
         } else {
             document.getElementById('gridContainer').style.display = 'block';
+            // Redraw table after layout settles
+            if (table) requestAnimationFrame(() => requestAnimationFrame(() => table.redraw(true)));
         }
 
         applyFilters();
+    }
+
+    // Toggle column visibility based on page
+    if (table) {
+        if (page === 'task') {
+            // Show status and category columns on Tasks page
+            table.showColumn("taskStatus");
+            table.showColumn("category");
+            table.hideColumn("entity");
+        } else if (page === 'all') {
+            // Show entity column only on All page
+            table.showColumn("entity");
+            table.hideColumn("taskStatus");
+            table.hideColumn("category");
+        } else {
+            // Hide status, category, and entity on Project/Knowledge pages
+            table.hideColumn("taskStatus");
+            table.hideColumn("category");
+            table.hideColumn("entity");
+        }
     }
 }
 
@@ -1564,30 +1471,6 @@ async function deletePerson(name) {
     }
 }
 
-/**
- * Copy text content to clipboard
- */
-function copyToClipboard(btn, type) {
-    const section = btn.closest('.modal-section');
-    const selectors = {
-        'snippet': '.modal-snippet-text',
-        'notes': '.modal-notes-text',
-        'ai': '.modal-ai-text'
-    };
-    const textEl = section.querySelector(selectors[type]);
-
-    if (textEl) {
-        navigator.clipboard.writeText(textEl.textContent).then(() => {
-            // Show copied feedback
-            btn.classList.add('copied');
-            setTimeout(() => btn.classList.remove('copied'), 1500);
-        }).catch(err => {
-            console.error('Failed to copy:', err);
-            showStatus('Failed to copy to clipboard', 'error');
-        });
-    }
-}
-
 // ============================================
 // VISUALISATION MODULE
 // ============================================
@@ -1659,10 +1542,128 @@ function populateVisFilters() {
         personSelect.appendChild(opt);
     });
 
-    // Set date defaults (all time - empty)
-    const today = new Date();
-    document.getElementById('visDateTo').value = today.toISOString().split('T')[0];
-    document.getElementById('visDateFrom').value = '';
+    // Initialize date range slider
+    initDateRangeSlider();
+}
+
+/**
+ * Initialize the date range slider for visualisation
+ */
+function initDateRangeSlider() {
+    // Find date range from all entries
+    if (allEntries.length === 0) return;
+
+    const dates = allEntries.map(e => {
+        const match = e.timestamp.match(/(\d{4})-(\d{2})-(\d{2})/);
+        if (!match) return null;
+        return new Date(match[1], match[2] - 1, match[3]);
+    }).filter(Boolean).sort((a, b) => a - b);
+
+    if (dates.length === 0) return;
+
+    const minDate = dates[0];
+    const maxDate = dates[dates.length - 1];
+
+    // Store in global state
+    window.visDateRange = { min: minDate, max: maxDate };
+
+    // Update labels
+    updateDateSliderLabels();
+
+    // Setup slider event listeners
+    const fromSlider = document.getElementById('visDateFromSlider');
+    const toSlider = document.getElementById('visDateToSlider');
+
+    if (!fromSlider || !toSlider) return;
+
+    fromSlider.addEventListener('input', () => {
+        const fromVal = parseInt(fromSlider.value);
+        const toVal = parseInt(toSlider.value);
+        if (fromVal > toVal) fromSlider.value = toVal;
+        updateDateSliderLabels();
+        updateSliderRange();
+        buildNetwork();
+    });
+
+    toSlider.addEventListener('input', () => {
+        const fromVal = parseInt(fromSlider.value);
+        const toVal = parseInt(toSlider.value);
+        if (toVal < fromVal) toSlider.value = fromVal;
+        updateDateSliderLabels();
+        updateSliderRange();
+        buildNetwork();
+    });
+
+    updateSliderRange();
+}
+
+/**
+ * Update the visual range indicator on the slider
+ */
+function updateSliderRange() {
+    const fromSlider = document.getElementById('visDateFromSlider');
+    const toSlider = document.getElementById('visDateToSlider');
+    const rangeEl = document.getElementById('visSliderRange');
+
+    if (!fromSlider || !toSlider || !rangeEl) return;
+
+    const fromVal = parseInt(fromSlider.value);
+    const toVal = parseInt(toSlider.value);
+
+    rangeEl.style.left = fromVal + '%';
+    rangeEl.style.width = (toVal - fromVal) + '%';
+}
+
+/**
+ * Update date labels based on slider positions
+ */
+function updateDateSliderLabels() {
+    if (!window.visDateRange) return;
+
+    const fromSlider = document.getElementById('visDateFromSlider');
+    const toSlider = document.getElementById('visDateToSlider');
+    const fromLabel = document.getElementById('visDateFromLabel');
+    const toLabel = document.getElementById('visDateToLabel');
+
+    if (!fromSlider || !toSlider || !fromLabel || !toLabel) return;
+
+    const { min, max } = window.visDateRange;
+    const totalDays = (max - min) / (1000 * 60 * 60 * 24);
+
+    const fromVal = parseInt(fromSlider.value);
+    const toVal = parseInt(toSlider.value);
+
+    const fromDate = new Date(min.getTime() + (totalDays * fromVal / 100) * 24 * 60 * 60 * 1000);
+    const toDate = new Date(min.getTime() + (totalDays * toVal / 100) * 24 * 60 * 60 * 1000);
+
+    // Format dates
+    const formatDate = (d) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+
+    fromLabel.textContent = fromVal === 0 ? 'Start' : formatDate(fromDate);
+    toLabel.textContent = toVal === 100 ? 'Now' : formatDate(toDate);
+}
+
+/**
+ * Get the selected date range from sliders
+ */
+function getVisDateRange() {
+    if (!window.visDateRange) return { from: null, to: null };
+
+    const fromSlider = document.getElementById('visDateFromSlider');
+    const toSlider = document.getElementById('visDateToSlider');
+
+    if (!fromSlider || !toSlider) return { from: null, to: null };
+
+    const { min, max } = window.visDateRange;
+    const totalDays = (max - min) / (1000 * 60 * 60 * 24);
+
+    const fromVal = parseInt(fromSlider.value);
+    const toVal = parseInt(toSlider.value);
+
+    const fromDate = fromVal === 0 ? null : new Date(min.getTime() + (totalDays * fromVal / 100) * 24 * 60 * 60 * 1000);
+    const toDate = toVal === 100 ? null : new Date(min.getTime() + (totalDays * toVal / 100) * 24 * 60 * 60 * 1000);
+
+    return { from: fromDate, to: toDate };
 }
 
 /**
@@ -1828,8 +1829,7 @@ function getVisFilteredEntries() {
     const topicFilter = document.getElementById('visFilterTopic').value;
     const personFilter = document.getElementById('visFilterPerson').value;
     const searchValue = document.getElementById('visSearch').value.toLowerCase();
-    const dateFrom = document.getElementById('visDateFrom').value;
-    const dateTo = document.getElementById('visDateTo').value;
+    const { from: dateFrom, to: dateTo } = getVisDateRange();
 
     return allEntries.filter(entry => {
         // Entity filter
@@ -1844,11 +1844,14 @@ function getVisFilteredEntries() {
         // Person filter
         if (personFilter && (!entry.people || !entry.people.includes(personFilter))) return false;
 
-        // Date filter
+        // Date filter (using slider range)
         if (dateFrom || dateTo) {
-            const entryDate = new Date(entry.timestamp.replace(' ', 'T'));
-            if (dateFrom && entryDate < new Date(dateFrom)) return false;
-            if (dateTo && entryDate > new Date(dateTo + 'T23:59:59')) return false;
+            const match = entry.timestamp.match(/(\d{4})-(\d{2})-(\d{2})/);
+            if (match) {
+                const entryDate = new Date(match[1], match[2] - 1, match[3]);
+                if (dateFrom && entryDate < dateFrom) return false;
+                if (dateTo && entryDate > dateTo) return false;
+            }
         }
 
         // Search filter
@@ -1996,8 +1999,6 @@ function setupVisEventListeners() {
     document.getElementById('visFilterType').addEventListener('change', buildNetwork);
     document.getElementById('visFilterTopic').addEventListener('change', buildNetwork);
     document.getElementById('visFilterPerson').addEventListener('change', buildNetwork);
-    document.getElementById('visDateFrom').addEventListener('change', buildNetwork);
-    document.getElementById('visDateTo').addEventListener('change', buildNetwork);
 
     document.getElementById('visResetBtn').addEventListener('click', function() {
         document.getElementById('visSearch').value = '';
@@ -2005,8 +2006,13 @@ function setupVisEventListeners() {
         document.getElementById('visFilterType').value = '';
         document.getElementById('visFilterTopic').value = '';
         document.getElementById('visFilterPerson').value = '';
-        document.getElementById('visDateFrom').value = '';
-        document.getElementById('visDateTo').value = new Date().toISOString().split('T')[0];
+        // Reset date sliders
+        const fromSlider = document.getElementById('visDateFromSlider');
+        const toSlider = document.getElementById('visDateToSlider');
+        if (fromSlider) fromSlider.value = 0;
+        if (toSlider) toSlider.value = 100;
+        updateDateSliderLabels();
+        updateSliderRange();
         buildNetwork();
     });
 
@@ -2020,12 +2026,262 @@ function setupVisEventListeners() {
 }
 
 // ============================================
+// VISUALISE 2 MODULE (Multi-View)
+// ============================================
+
+let vis2Network = null;
+let vis2Timeline = null;
+let vis2CurrentView = 'network';
+let vis2Data = null;
+
+function initVisualise2() {
+    vis2Data = buildVis2Data();
+    populateVis2TypeFilter();
+    setupVis2EventListeners();
+    renderVis2CurrentView();
+    updateVis2Stats();
+}
+
+function buildVis2Data() {
+    const entityFilter = document.getElementById('vis2FilterEntity')?.value || '';
+    const typeFilter = document.getElementById('vis2FilterType')?.value || '';
+    let entries = allEntries.filter(entry => {
+        if (entityFilter && entry.entity !== entityFilter) return false;
+        if (typeFilter && entry.type !== typeFilter) return false;
+        return true;
+    });
+    const topics = {};
+    entries.forEach(entry => {
+        if (entry.topics && Array.isArray(entry.topics)) {
+            entry.topics.forEach(topic => {
+                if (!topics[topic]) topics[topic] = { count: 0, entries: [], people: new Set(), entities: { project: 0, task: 0, knowledge: 0 } };
+                topics[topic].count++;
+                topics[topic].entries.push(entry);
+                topics[topic].entities[entry.entity]++;
+                if (entry.people) entry.people.forEach(p => topics[topic].people.add(p));
+            });
+        }
+    });
+    Object.values(topics).forEach(t => t.people = Array.from(t.people));
+    const people = {};
+    entries.forEach(entry => {
+        if (entry.people && Array.isArray(entry.people)) {
+            entry.people.forEach(person => {
+                if (!people[person]) people[person] = { count: 0, entries: [], topics: new Set(), entities: { project: 0, task: 0, knowledge: 0 } };
+                people[person].count++;
+                people[person].entries.push(entry);
+                people[person].entities[entry.entity]++;
+                if (entry.topics) entry.topics.forEach(t => people[person].topics.add(t));
+            });
+        }
+    });
+    Object.values(people).forEach(p => p.topics = Array.from(p.topics));
+    const timeline = entries.slice().sort((a, b) => new Date(a.timestamp.split(' ')[0]) - new Date(b.timestamp.split(' ')[0]));
+    return { entries, topics, people, timeline };
+}
+
+function populateVis2TypeFilter() {
+    const typeSelect = document.getElementById('vis2FilterType');
+    if (!typeSelect) return;
+    typeSelect.innerHTML = '<option value="">All types</option>';
+    [...new Set(allEntries.map(e => e.type).filter(Boolean))].sort().forEach(type => {
+        const opt = document.createElement('option');
+        opt.value = type;
+        opt.textContent = type;
+        typeSelect.appendChild(opt);
+    });
+}
+
+function setupVis2EventListeners() {
+    document.querySelectorAll('.vis2-tab').forEach(tab => {
+        if (tab.dataset.listenerAdded) return;
+        tab.addEventListener('click', function() { switchVis2View(this.dataset.view); });
+        tab.dataset.listenerAdded = 'true';
+    });
+    const entityFilter = document.getElementById('vis2FilterEntity');
+    const typeFilter = document.getElementById('vis2FilterType');
+    if (entityFilter && !entityFilter.dataset.listenerAdded) {
+        entityFilter.addEventListener('change', () => { vis2Data = buildVis2Data(); renderVis2CurrentView(); updateVis2Stats(); });
+        entityFilter.dataset.listenerAdded = 'true';
+    }
+    if (typeFilter && !typeFilter.dataset.listenerAdded) {
+        typeFilter.addEventListener('change', () => { vis2Data = buildVis2Data(); renderVis2CurrentView(); updateVis2Stats(); });
+        typeFilter.dataset.listenerAdded = 'true';
+    }
+    const refreshBtn = document.getElementById('vis2RefreshBtn');
+    if (refreshBtn && !refreshBtn.dataset.listenerAdded) {
+        refreshBtn.addEventListener('click', () => { vis2Data = buildVis2Data(); renderVis2CurrentView(); updateVis2Stats(); });
+        refreshBtn.dataset.listenerAdded = 'true';
+    }
+    const fitBtn = document.getElementById('vis2FitBtn');
+    if (fitBtn && !fitBtn.dataset.listenerAdded) {
+        fitBtn.addEventListener('click', () => {
+            if (vis2CurrentView === 'network' && vis2Network) vis2Network.fit({ animation: { duration: 500 } });
+            else if (vis2CurrentView === 'timeline' && vis2Timeline) vis2Timeline.fit();
+        });
+        fitBtn.dataset.listenerAdded = 'true';
+    }
+}
+
+function switchVis2View(view) {
+    vis2CurrentView = view;
+    document.querySelectorAll('.vis2-tab').forEach(tab => tab.classList.toggle('active', tab.dataset.view === view));
+    document.querySelectorAll('.vis2-view-container').forEach(c => c.style.display = c.dataset.view === view ? 'block' : 'none');
+    renderVis2CurrentView();
+}
+
+function renderVis2CurrentView() {
+    switch (vis2CurrentView) {
+        case 'network': renderVis2Network(); break;
+        case 'topics': renderVis2Topics(); break;
+        case 'people': renderVis2People(); break;
+        case 'timeline': renderVis2Timeline(); break;
+    }
+}
+
+function updateVis2Stats() {
+    const stats = document.getElementById('vis2Stats');
+    if (!stats || !vis2Data) return;
+    stats.innerHTML = `<div class="vis-stats-row"><span class="vis-stats-label">Entries</span><span class="vis-stats-value">${vis2Data.entries.length}</span></div>
+        <div class="vis-stats-row"><span class="vis-stats-label">Topics</span><span class="vis-stats-value">${Object.keys(vis2Data.topics).length}</span></div>
+        <div class="vis-stats-row"><span class="vis-stats-label">People</span><span class="vis-stats-value">${Object.keys(vis2Data.people).length}</span></div>`;
+}
+
+function renderVis2Network() {
+    const container = document.getElementById('vis2Network');
+    if (!container || !vis2Data) return;
+    const { nodes, edges } = buildGraphData(vis2Data.entries);
+    const visNodes = new vis.DataSet(nodes);
+    const visEdges = new vis.DataSet(edges);
+    const options = {
+        nodes: { shape: 'dot', size: 25, font: { size: 14, color: '#333' }, borderWidth: 2, shadow: true },
+        edges: { width: 2, color: { color: '#ccc', highlight: '#ff5200' }, smooth: { type: 'continuous' } },
+        physics: { stabilization: { iterations: 150 }, barnesHut: { gravitationalConstant: -3000, springLength: 200 } },
+        interaction: { hover: true, tooltipDelay: 200 },
+        groups: { entry: { shape: 'dot', size: 20 }, topic: { shape: 'diamond', color: { background: '#0ea5e9', border: '#0284c7' }, size: 15 },
+            person: { shape: 'triangle', color: { background: '#f59e0b', border: '#d97706' }, size: 15 } }
+    };
+    vis2Network = new vis.Network(container, { nodes: visNodes, edges: visEdges }, options);
+    vis2Network.on('click', function(params) {
+        if (params.nodes.length > 0) {
+            const node = visNodes.get(params.nodes[0]);
+            if (node?.entryData) showVis2Selection(node.entryData);
+        }
+    });
+}
+
+function renderVis2Topics() {
+    const container = document.getElementById('vis2Topics');
+    if (!container || !vis2Data) return;
+    container.innerHTML = '';
+    const topics = vis2Data.topics;
+    if (Object.keys(topics).length === 0) { container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#888;">No topics found</div>'; return; }
+    const hierarchy = { name: 'root', children: Object.entries(topics).map(([name, data]) => ({ name, value: data.count, entities: data.entities })) };
+    const width = container.clientWidth, height = container.clientHeight;
+    const svg = d3.select(container).append('svg').attr('class', 'vis2-circle-pack').attr('width', width).attr('height', height);
+    const pack = d3.pack().size([width - 4, height - 4]).padding(8);
+    const root = d3.hierarchy(hierarchy).sum(d => d.value).sort((a, b) => b.value - a.value);
+    pack(root);
+    const getColor = (d) => {
+        if (!d.data.entities) return '#6366f1';
+        const { project, task, knowledge } = d.data.entities;
+        const total = project + task + knowledge;
+        if (total === 0) return '#6366f1';
+        return `rgb(${Math.round((project * 59 + task * 34 + knowledge * 245) / total)},${Math.round((project * 130 + task * 197 + knowledge * 158) / total)},${Math.round((project * 246 + task * 94 + knowledge * 11) / total)})`;
+    };
+    const nodes = svg.selectAll('g').data(root.leaves()).join('g').attr('transform', d => `translate(${d.x + 2},${d.y + 2})`);
+    nodes.append('circle').attr('r', d => d.r).attr('fill', d => getColor(d)).attr('fill-opacity', 0.7)
+        .attr('stroke', d => d3.color(getColor(d)).darker(0.5)).attr('stroke-width', 2).style('cursor', 'pointer')
+        .on('click', (e, d) => showVis2TopicDetail(d.data.name, d.data));
+    nodes.filter(d => d.r > 25).append('text').attr('text-anchor', 'middle').attr('dy', '0.35em')
+        .attr('font-size', d => Math.min(d.r / 3, 14)).attr('fill', '#fff').attr('font-weight', '500')
+        .text(d => d.data.name.length > 12 ? d.data.name.substring(0, 10) + '...' : d.data.name);
+    nodes.filter(d => d.r > 20).append('text').attr('text-anchor', 'middle').attr('dy', d => d.r > 40 ? '1.5em' : '0')
+        .attr('font-size', 10).attr('fill', 'rgba(255,255,255,0.8)').text(d => d.data.value);
+}
+
+function showVis2TopicDetail(name, data) {
+    const sel = document.getElementById('vis2Selection');
+    if (!sel) return;
+    sel.classList.add('has-selection');
+    sel.innerHTML = `<div class="vis2-selection-title">#${name}</div><div class="vis2-selection-meta"><div>${data.count || data.value} entries</div>
+        <div style="margin-top:4px;"><span style="color:#3b82f6;">${data.entities?.project || 0} projects</span> · <span style="color:#22c55e;">${data.entities?.task || 0} tasks</span> · <span style="color:#f59e0b;">${data.entities?.knowledge || 0} knowledge</span></div></div>`;
+}
+
+function renderVis2People() {
+    const container = document.getElementById('vis2People');
+    if (!container || !vis2Data) return;
+    container.innerHTML = '';
+    const people = vis2Data.people;
+    if (Object.keys(people).length === 0) { container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#888;">No people found</div>'; return; }
+    const width = container.clientWidth, height = container.clientHeight, centerX = width / 2, centerY = height / 2, radius = Math.min(width, height) / 2 - 80;
+    const svg = d3.select(container).append('svg').attr('class', 'vis2-radial').attr('width', width).attr('height', height);
+    const peopleArray = Object.entries(people).map(([name, data]) => ({ name, ...data })).sort((a, b) => b.count - a.count);
+    const angleStep = (2 * Math.PI) / peopleArray.length;
+    const links = [];
+    for (let i = 0; i < peopleArray.length; i++) {
+        for (let j = i + 1; j < peopleArray.length; j++) {
+            const shared = peopleArray[i].topics.filter(t => peopleArray[j].topics.includes(t));
+            if (shared.length > 0) links.push({ source: i, target: j, strength: shared.length });
+        }
+    }
+    svg.selectAll('line.link').data(links).join('line').attr('class', 'link')
+        .attr('x1', d => centerX + radius * Math.cos(d.source * angleStep - Math.PI/2)).attr('y1', d => centerY + radius * Math.sin(d.source * angleStep - Math.PI/2))
+        .attr('x2', d => centerX + radius * Math.cos(d.target * angleStep - Math.PI/2)).attr('y2', d => centerY + radius * Math.sin(d.target * angleStep - Math.PI/2))
+        .attr('stroke', '#e5e7eb').attr('stroke-width', d => Math.min(d.strength, 4)).attr('stroke-opacity', 0.4);
+    const maxCount = Math.max(...peopleArray.map(p => p.count));
+    const sizeScale = d3.scaleSqrt().domain([1, maxCount]).range([15, 40]);
+    const nodes = svg.selectAll('g.person-node').data(peopleArray).join('g').attr('class', 'person-node')
+        .attr('transform', (d, i) => `translate(${centerX + radius * Math.cos(i * angleStep - Math.PI/2)},${centerY + radius * Math.sin(i * angleStep - Math.PI/2)})`)
+        .style('cursor', 'pointer').on('click', (e, d) => showVis2PersonDetail(d));
+    nodes.append('circle').attr('r', d => sizeScale(d.count)).attr('fill', '#f59e0b').attr('fill-opacity', 0.8).attr('stroke', '#d97706').attr('stroke-width', 2);
+    nodes.append('text').attr('text-anchor', 'middle').attr('dy', d => sizeScale(d.count) + 14).attr('font-size', 12).attr('fill', '#333').text(d => d.name.length > 15 ? d.name.substring(0, 12) + '...' : d.name);
+    nodes.filter(d => sizeScale(d.count) > 18).append('text').attr('text-anchor', 'middle').attr('dy', '0.35em').attr('font-size', 11).attr('fill', '#fff').attr('font-weight', '600').text(d => d.count);
+}
+
+function showVis2PersonDetail(data) {
+    const sel = document.getElementById('vis2Selection');
+    if (!sel) return;
+    sel.classList.add('has-selection');
+    sel.innerHTML = `<div class="vis2-selection-title">@${data.name}</div><div class="vis2-selection-meta"><div>${data.count} entries</div>
+        <div style="margin-top:4px;"><span style="color:#3b82f6;">${data.entities.project} projects</span> · <span style="color:#22c55e;">${data.entities.task} tasks</span> · <span style="color:#f59e0b;">${data.entities.knowledge} knowledge</span></div>
+        ${data.topics.length > 0 ? `<div style="margin-top:8px;color:#0ea5e9;font-size:11px;">Topics: ${data.topics.slice(0, 5).map(t => '#' + t).join(', ')}${data.topics.length > 5 ? '...' : ''}</div>` : ''}</div>`;
+}
+
+function renderVis2Timeline() {
+    const container = document.getElementById('vis2Timeline');
+    if (!container || !vis2Data) return;
+    if (vis2Timeline) { vis2Timeline.destroy(); vis2Timeline = null; }
+    const entries = vis2Data.timeline;
+    if (entries.length === 0) { container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#888;">No entries found</div>'; return; }
+    const items = entries.map((entry, idx) => {
+        const dateMatch = entry.timestamp.match(/(\d{4}-\d{2}-\d{2})/);
+        return { id: idx, content: truncateLabel(entry.title || '(untitled)', 30), start: dateMatch ? dateMatch[1] : entry.timestamp.split(' ')[0], group: entry.entity, className: 'entity-' + entry.entity, entryData: entry };
+    });
+    const groups = [{ id: 'project', content: 'Projects', style: 'color: #3b82f6; font-weight: 500;' }, { id: 'task', content: 'Tasks', style: 'color: #22c55e; font-weight: 500;' }, { id: 'knowledge', content: 'Knowledge', style: 'color: #f59e0b; font-weight: 500;' }];
+    vis2Timeline = new vis.Timeline(container, items, groups, { stack: true, showCurrentTime: true, zoomMin: 86400000, zoomMax: 63072000000, height: '100%', margin: { item: 10 }, orientation: 'top' });
+    vis2Timeline.on('select', function(props) { if (props.items.length > 0) { const item = items.find(i => i.id === props.items[0]); if (item?.entryData) showVis2Selection(item.entryData); } });
+}
+
+function showVis2Selection(entry) {
+    const sel = document.getElementById('vis2Selection');
+    if (!sel) return;
+    sel.classList.add('has-selection');
+    sel.innerHTML = `<div class="vis2-selection-title">${entry.title || '(untitled)'}</div><div class="vis2-selection-meta"><div>${entry.entity} · ${entry.type}</div><div style="margin-top:4px;">${entry.timestamp}</div>
+        ${entry.topics?.length ? `<div style="margin-top:8px;color:#0ea5e9;font-size:11px;">${entry.topics.map(t => '#' + t).join(' ')}</div>` : ''}
+        ${entry.people?.length ? `<div style="margin-top:4px;color:#f59e0b;font-size:11px;">${entry.people.map(p => '@' + p).join(' ')}</div>` : ''}</div>`;
+}
+
+// ============================================
 // KANBAN BOARD MODULE
 // ============================================
 
 // Legacy aliases - use AppState.kanbanColumns and AppState.currentTaskView instead
 let kanbanColumns = [];
 let currentTaskView = 'list'; // 'list' or 'kanban'
+let taskCategoryFilter = 'all'; // 'all', 'work', or 'personal'
+let hideCompletedTasks = false;
+let globalCategoryFilter = ''; // '' (all), 'work', or 'personal'
 
 /**
  * Load kanban columns from API
@@ -2063,21 +2319,66 @@ function renderKanbanBoard() {
     const board = document.getElementById('kanbanBoard');
     if (!board) return;
 
-    // Get task entries only
-    const taskEntries = allEntries.filter(e => e.entity === 'task');
+    // Get task entries only, applying task filters
+    let taskEntries = allEntries.filter(e => e.entity === 'task');
+
+    // Apply work/personal category filter
+    if (taskCategoryFilter !== 'all') {
+        taskEntries = taskEntries.filter(e => e.category === taskCategoryFilter);
+    }
+
+    // Apply hide completed filter
+    if (hideCompletedTasks) {
+        taskEntries = taskEntries.filter(e => e.taskStatus !== 'done');
+    }
+
     const defaultColumnIds = ['not-started', 'in-progress', 'done'];
+
+    // Count completed tasks before filtering (for showing hidden count)
+    const allTaskEntries = allEntries.filter(e => e.entity === 'task');
+    let completedCount = allTaskEntries.filter(e => e.taskStatus === 'done').length;
+    // Also apply category filter to completed count
+    if (taskCategoryFilter !== 'all') {
+        completedCount = allTaskEntries.filter(e => e.taskStatus === 'done' && e.category === taskCategoryFilter).length;
+    }
 
     // Build columns HTML
     let html = '';
 
     kanbanColumns.forEach(column => {
+        const isDefault = defaultColumnIds.includes(column.id);
+        const isDisabledColumn = hideCompletedTasks && column.id === 'done';
+
+        // For disabled column, show special rendering
+        if (isDisabledColumn) {
+            html += `
+                <div class="kanban-column kanban-column-disabled" data-column-id="${escapeHtml(column.id)}">
+                    <div class="kanban-column-header" style="border-color: ${column.color}; background: var(--bg-muted);">
+                        <div class="kanban-color-bar" style="background: ${column.color}; opacity: 0.5;"></div>
+                        <div class="kanban-header-content">
+                            <span class="kanban-column-name">${escapeHtml(column.name)}</span>
+                            <div class="kanban-header-actions">
+                                <span class="kanban-column-count">${completedCount} hidden</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="kanban-column-cards kanban-drop-disabled">
+                        <div class="kanban-disabled-message">
+                            Completed tasks hidden.<br>
+                            Uncheck "Hide completed" to view.
+                        </div>
+                    </div>
+                </div>
+            `;
+            return;
+        }
+
         // Get tasks for this column
         const columnTasks = taskEntries.filter(task => {
             const status = task.taskStatus || 'not-started';
             return status === column.id;
         });
 
-        const isDefault = defaultColumnIds.includes(column.id);
         const canDelete = !isDefault && columnTasks.length === 0;
 
         html += `
@@ -2342,8 +2643,10 @@ function renderKanbanCard(task) {
         }
     }
 
+    const isCompleted = task.taskStatus === 'done';
+
     return `
-        <div class="kanban-card" draggable="true" data-timestamp="${escapeHtml(task.timestamp)}" onclick="openDetailPanel(allEntries.find(e => e.timestamp === '${escapeHtml(task.timestamp)}'))">
+        <div class="kanban-card${isCompleted ? ' completed' : ''}" draggable="true" data-timestamp="${escapeHtml(task.timestamp)}" onclick="openDetailPanel(allEntries.find(e => e.timestamp === '${escapeHtml(task.timestamp)}'))">
             <div class="kanban-card-title">${titleHtml}</div>
             <div class="kanban-card-meta">
                 <span class="type-badge" style="background:${typeColor};font-size:10px;padding:2px 6px">${escapeHtml(task.type)}</span>
@@ -2418,6 +2721,12 @@ async function handleDrop(e) {
 
     if (!timestamp || !newStatus) return;
 
+    // Prevent dropping on Done column when hiding completed
+    if (hideCompletedTasks && newStatus === 'done') {
+        showStatus('Cannot move to Done while hiding completed tasks', 'warning');
+        return;
+    }
+
     // Update status via API
     try {
         const response = await fetch('/api/entries', {
@@ -2449,14 +2758,6 @@ async function handleDrop(e) {
  * Setup kanban event listeners
  */
 function setupKanbanEventListeners() {
-    // View toggle buttons
-    document.querySelectorAll('.view-toggle-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const view = btn.dataset.view;
-            switchTaskView(view);
-        });
-    });
-
     // Add column button
     const addColBtn = document.getElementById('addColumnBtn');
     if (addColBtn) {
@@ -2477,8 +2778,8 @@ function setupKanbanEventListeners() {
 function switchTaskView(view) {
     currentTaskView = view;
 
-    // Update toggle buttons
-    document.querySelectorAll('.view-toggle-btn').forEach(btn => {
+    // Update toggle buttons (new style using cat-toggle-btn)
+    document.querySelectorAll('#viewToggle .cat-toggle-btn').forEach(btn => {
         btn.classList.toggle('active', btn.dataset.view === view);
     });
 
@@ -3360,8 +3661,12 @@ const DEFAULT_RESEARCH_PROMPT = `Do background research on this topic and provid
 function initSettingsPage() {
     if (!settingsInitialized) {
         // Set up save buttons
+        document.getElementById('saveGeneralBtn').addEventListener('click', saveGeneralSettings);
         document.getElementById('saveSettingsBtn').addEventListener('click', saveSettings);
         document.getElementById('savePromptsBtn').addEventListener('click', savePrompts);
+
+        // Set up browse button
+        document.getElementById('browseProjectFolderBtn').addEventListener('click', browseProjectFolder);
 
         // Set up reset buttons
         document.getElementById('resetClassificationPrompt').addEventListener('click', () => {
@@ -3403,6 +3708,10 @@ async function loadSettings() {
         const response = await fetch('/api/settings');
         const settings = await response.json();
 
+        // Populate general fields
+        document.getElementById('settingProjectFolder').value = settings.project_folder || '';
+        document.getElementById('settingExtensionId').value = settings.extension_id || '';
+
         // Populate integration fields
         document.getElementById('settingGithubToken').value = settings.github_token || '';
         document.getElementById('settingGithubOrg').value = settings.github_org || '';
@@ -3431,6 +3740,69 @@ async function loadSettings() {
             settings.research_prompt || DEFAULT_RESEARCH_PROMPT;
     } catch (error) {
         console.error('Failed to load settings:', error);
+    }
+}
+
+/**
+ * Open folder picker dialog and populate project folder field
+ */
+async function browseProjectFolder() {
+    const statusEl = document.getElementById('generalStatus');
+    try {
+        const response = await fetch('/api/browse-folder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+        });
+        const result = await response.json();
+        if (result.success && result.path) {
+            document.getElementById('settingProjectFolder').value = result.path;
+        } else if (result.error && result.error !== 'No folder selected') {
+            statusEl.textContent = result.error;
+            statusEl.className = 'settings-status error';
+            setTimeout(() => { statusEl.textContent = ''; }, 3000);
+        }
+    } catch (error) {
+        statusEl.textContent = 'Error: ' + error.message;
+        statusEl.className = 'settings-status error';
+        setTimeout(() => { statusEl.textContent = ''; }, 3000);
+    }
+}
+
+/**
+ * Save general settings (project folder, extension ID)
+ */
+async function saveGeneralSettings() {
+    const statusEl = document.getElementById('generalStatus');
+    statusEl.textContent = 'Saving...';
+    statusEl.className = 'settings-status';
+
+    const settings = {
+        project_folder: document.getElementById('settingProjectFolder').value.trim(),
+        extension_id: document.getElementById('settingExtensionId').value.trim()
+    };
+
+    try {
+        const response = await fetch('/api/settings', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings)
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            statusEl.textContent = 'Saved!';
+            statusEl.className = 'settings-status';
+            setTimeout(() => {
+                statusEl.textContent = '';
+            }, 1500);
+        } else {
+            statusEl.textContent = result.error || 'Failed to save';
+            statusEl.className = 'settings-status error';
+        }
+    } catch (error) {
+        statusEl.textContent = 'Error: ' + error.message;
+        statusEl.className = 'settings-status error';
     }
 }
 
@@ -3673,17 +4045,43 @@ let currentDetailEntry = null;
  */
 function getTypeIcon(type) {
     const icons = {
+        // Core types
         link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
-        idea: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>',
+        idea: '<path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.9V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.1A7 7 0 0 0 12 2z"/>',
         task: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>',
-        file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>',
+
+        // Notes
+        note: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>',
+        'long-note': '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>',
+        snippet: '<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>',
+        para: '<line x1="17" y1="10" x2="3" y2="10"/><line x1="21" y1="6" x2="3" y2="6"/><line x1="21" y1="14" x2="3" y2="14"/><line x1="17" y1="18" x2="3" y2="18"/>',
+        markdown: '<path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/><path d="M7 15V9l2 2 2-2v6"/><path d="M17 9v6l-2-2"/>',
+
+        // Files
+        file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>',
+        pdf: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>',
+
+        // Media
         image: '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>',
         video: '<polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>',
         audio: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
         screenshot: '<rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>',
-        pdf: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>'
+
+        // Microsoft Office
+        'ms-word': '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M8 13l1.5 4 1.5-4 1.5 4 1.5-4"/>',
+        'ms-excel': '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/><line x1="12" y1="9" x2="12" y2="21"/>',
+        'ms-powerpoint': '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><rect x="8" y="12" width="8" height="6" rx="1"/>',
+        'ms-onenote': '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M8 12h2l2 5 2-5h2"/>',
+
+        // AI Assistants
+        claude: '<circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/>',
+        chatgpt: '<circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/>',
+        perplexity: '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
+
+        // Productivity
+        notion: '<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/>'
     };
-    return icons[type] || icons.link;
+    return icons[type] || icons.file;
 }
 
 /**
@@ -3731,6 +4129,27 @@ function openDetailPanel(entry) {
     }
     bodyHtml += `<span class="type-badge" style="background:${TYPE_COLORS[entry.type] || '#64748b'}">${escapeHtml(entry.type)}</span>`;
     bodyHtml += `</div>`;
+
+    // Task status dropdown (only for tasks)
+    if (entry.entity === 'task') {
+        const currentStatus = entry.taskStatus || 'not-started';
+        // Use kanbanColumns if loaded, otherwise use defaults
+        const columns = kanbanColumns.length > 0 ? kanbanColumns : [
+            { id: 'not-started', name: 'Not started' },
+            { id: 'in-progress', name: 'In progress' },
+            { id: 'done', name: 'Done' }
+        ];
+        bodyHtml += `
+            <div class="detail-section detail-status-section">
+                <label class="detail-label">Status</label>
+                <select class="task-status-select" id="detailStatusSelect" data-timestamp="${escapeHtml(entry.timestamp)}">
+                    ${columns.map(col => `
+                        <option value="${escapeHtml(col.id)}" ${currentStatus === col.id ? 'selected' : ''}>${escapeHtml(col.name)}</option>
+                    `).join('')}
+                </select>
+            </div>
+        `;
+    }
 
     // Tags (topics + people)
     const hasTags = (entry.topics && entry.topics.length > 0) || (entry.people && entry.people.length > 0);
@@ -3781,10 +4200,7 @@ function openDetailPanel(entry) {
         `;
     }
 
-    // AI Summary
-    const NO_SUMMARY_TYPES = ['video'];
-    const shouldHaveAiSummary = !NO_SUMMARY_TYPES.includes(entry.type);
-
+    // AI Summary - only show if there is one
     if (entry.aiSummary) {
         bodyHtml += `
             <div class="detail-section detail-ai-section">
@@ -3798,15 +4214,6 @@ function openDetailPanel(entry) {
                     </button>
                 </div>
                 <div class="detail-ai-text">${escapeHtml(entry.aiSummary)}</div>
-            </div>
-        `;
-    } else if (shouldHaveAiSummary) {
-        bodyHtml += `
-            <div class="detail-section detail-ai-section">
-                <div class="detail-section-header">
-                    <h4>AI Summary <span class="ai-processing-spinner" title="Processing..."></span></h4>
-                </div>
-                <div class="detail-ai-text"></div>
             </div>
         `;
     }
@@ -3934,6 +4341,16 @@ function openDetailPanel(entry) {
         }
     };
 
+    // Set up status select for tasks
+    const statusSelect = document.getElementById('detailStatusSelect');
+    if (statusSelect) {
+        statusSelect.addEventListener('change', async (e) => {
+            const newStatus = e.target.value;
+            const timestamp = e.target.dataset.timestamp;
+            await updateTaskStatus(timestamp, newStatus);
+        });
+    }
+
     // Load text file content if needed
     const codePreview = bodyEl.querySelector('.detail-code-preview');
     if (codePreview) {
@@ -3950,11 +4367,6 @@ function openDetailPanel(entry) {
             });
     }
 
-    // Start AI polling if needed
-    if (!entry.aiSummary && shouldHaveAiSummary) {
-        startAiPolling(entry.timestamp);
-    }
-
     // Handle escape key
     document.addEventListener('keydown', handleDetailPanelEscape);
 }
@@ -3967,7 +4379,6 @@ function closeDetailPanel() {
     panel.setAttribute('data-open', 'false');
     document.body.style.overflow = '';
     currentDetailEntry = null;
-    stopAiPolling();
     document.removeEventListener('keydown', handleDetailPanelEscape);
 }
 
@@ -4059,11 +4470,14 @@ function getDashboardStats() {
 /**
  * Render recent items list
  */
+/** How many recent items to show */
+let recentItemsCount = 5;
+
 function renderRecentItems() {
     const container = document.getElementById('recentItems');
-    const recentEntries = [...allEntries]
-        .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
-        .slice(0, 5);
+    const sortedEntries = [...allEntries].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+    const recentEntries = sortedEntries.slice(0, recentItemsCount);
+    const hasMore = sortedEntries.length > recentItemsCount;
 
     if (recentEntries.length === 0) {
         container.innerHTML = `
@@ -4074,7 +4488,7 @@ function renderRecentItems() {
         return;
     }
 
-    container.innerHTML = recentEntries.map(entry => {
+    const itemsHtml = recentEntries.map(entry => {
         const typeColor = TYPE_COLORS[entry.type] || '#64748b';
         const icon = getTypeIcon(entry.type);
         const title = entry.title || '(untitled)';
@@ -4083,19 +4497,29 @@ function renderRecentItems() {
 
         return `
             <div class="recent-item" onclick="openDetailPanel(allEntries.find(e => e.timestamp === '${escapeHtml(entry.timestamp)}'))">
-                <div class="recent-item-icon">
+                <div class="recent-item-icon" style="background: ${typeColor}; color: #1f2937">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${icon}</svg>
                 </div>
                 <div class="recent-item-content">
                     <div class="recent-item-title">${escapeHtml(title)}</div>
-                    <div class="recent-item-meta">${escapeHtml(source)} • ${timestamp}</div>
-                </div>
-                <div class="recent-item-badge">
-                    <span class="type-badge" style="background:${typeColor};font-size:10px;padding:2px 6px">${escapeHtml(entry.type)}</span>
+                    <div class="recent-item-meta">${escapeHtml(entry.type)} • ${timestamp}</div>
                 </div>
             </div>
         `;
     }).join('');
+
+    const loadMoreHtml = hasMore ? `
+        <button class="load-more-btn" onclick="loadMoreRecentItems()">
+            Load more
+        </button>
+    ` : '';
+
+    container.innerHTML = itemsHtml + loadMoreHtml;
+}
+
+function loadMoreRecentItems() {
+    recentItemsCount += 5;
+    renderRecentItems();
 }
 
 /**
@@ -4128,7 +4552,7 @@ function formatRelativeTime(timestamp) {
 }
 
 /**
- * Render type breakdown cards
+ * Render type breakdown as horizontal bar chart
  */
 function renderTypeBreakdown() {
     const container = document.getElementById('typeBreakdown');
@@ -4146,16 +4570,22 @@ function renderTypeBreakdown() {
         .slice(0, 8); // Show top 8 types
 
     if (sortedTypes.length === 0) {
-        container.innerHTML = '';
+        container.innerHTML = '<div class="empty-state">No entries yet</div>';
         return;
     }
 
+    const maxCount = sortedTypes[0][1];
+
     container.innerHTML = sortedTypes.map(([type, count]) => {
         const color = TYPE_COLORS[type] || '#64748b';
+        const widthPercent = (count / maxCount) * 100;
         return `
-            <div class="type-card" onclick="filterByType('${escapeHtml(type)}')" style="border-left: 3px solid ${color}">
-                <div class="type-card-count">${count}</div>
-                <div class="type-card-label">${escapeHtml(type)}</div>
+            <div class="type-bar-row" onclick="filterByType('${escapeHtml(type)}')">
+                <span class="type-bar-label">${escapeHtml(type)}</span>
+                <div class="type-bar-track">
+                    <div class="type-bar-fill" style="width: ${widthPercent}%; background: ${color}"></div>
+                </div>
+                <span class="type-bar-count">${count}</span>
             </div>
         `;
     }).join('');

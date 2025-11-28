@@ -1099,7 +1099,29 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
             self.send_json({'success': False, 'error': f'Invalid JSON: {str(e)}'}, 400)
             return
 
-        if parsed.path == '/api/topics':
+        if parsed.path == '/api/browse-folder':
+            # Open folder picker dialog
+            try:
+                import tkinter as tk
+                from tkinter import filedialog
+                root = tk.Tk()
+                root.withdraw()  # Hide the main window
+                root.attributes('-topmost', True)  # Bring dialog to front
+                folder_path = filedialog.askdirectory(title='Select Project Folder')
+                root.destroy()
+
+                if folder_path:
+                    # Normalize to Windows path with trailing backslash
+                    folder_path = folder_path.replace('/', '\\')
+                    if not folder_path.endswith('\\'):
+                        folder_path += '\\'
+                    self.send_json({'success': True, 'path': folder_path})
+                else:
+                    self.send_json({'success': False, 'error': 'No folder selected'})
+            except Exception as e:
+                self.send_json({'success': False, 'error': str(e)})
+
+        elif parsed.path == '/api/topics':
             name = body.get('name', '').strip()
             if not name:
                 self.send_json({'success': False, 'error': 'Name required'}, 400)
@@ -1484,7 +1506,8 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
         elif parsed.path == '/api/settings':
             # Update settings in native-host/settings.json
             # Only update fields that are provided and not masked
-            settings_file = get_project_folder() / 'native-host' / 'settings.json'
+            project_folder = get_project_folder()
+            settings_file = project_folder / 'native-host' / 'settings.json'
 
             # Load existing settings
             if settings_file.exists():
@@ -1492,6 +1515,14 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
                     settings = json.load(f)
             else:
                 settings = {}
+
+            # Track if extension_id changed
+            new_extension_id = body.get('extension_id')
+            extension_id_changed = (
+                new_extension_id and
+                not new_extension_id.startswith('•') and
+                new_extension_id != settings.get('extension_id')
+            )
 
             # Update only provided fields that aren't masked values
             for key, value in body.items():
@@ -1504,6 +1535,20 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
             # Write updated settings
             with open(settings_file, 'w', encoding='utf-8') as f:
                 json.dump(settings, f, indent=2)
+
+            # If extension_id changed, also update the native messaging manifest
+            if extension_id_changed:
+                manifest_file = project_folder / 'native-host' / 'com.ultrathink.kbsaver.json'
+                if manifest_file.exists():
+                    try:
+                        with open(manifest_file, 'r', encoding='utf-8') as f:
+                            manifest = json.load(f)
+                        manifest['allowed_origins'] = [f"chrome-extension://{new_extension_id}/"]
+                        with open(manifest_file, 'w', encoding='utf-8') as f:
+                            json.dump(manifest, f, indent=2)
+                    except Exception as e:
+                        # Log but don't fail - settings were saved successfully
+                        print(f"Warning: Failed to update manifest: {e}")
 
             self.send_json({'success': True})
 

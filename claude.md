@@ -24,4 +24,4 @@ After every code update, you MUST:
 
 ## Current Version
 
-**v3.0.0** (2025-11-27)
+**v3.1.0** (2025-11-28)

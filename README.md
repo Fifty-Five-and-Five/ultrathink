@@ -1,5 +1,10 @@
 # UltraThink URL Saver
 
+## TODO
+- [ ] Fix table column squishing on page navigation (Tabulator redraw timing issue)
+
+---
+
 A powerful Microsoft Edge extension that captures URLs, text snippets, screenshots, and files directly to a markdown knowledge base file (`kb.md`). Features AI-powered grammar correction, smart type detection, a web-based knowledge base viewer with kanban boards, and external service integrations.
 
 ## Features
@@ -384,7 +389,101 @@ Each entry in `kb.md` looks like this:
 
 ## Version History
 
-- **v3.0.0** (Current) - Major UI Redesign
+- **v3.1.0** (Current) - Visualise 2: Multi-View Visualization
+  - New "Visualise 2" page with four view modes:
+    - Network: Force-directed graph (vis.js) showing entries, topics, and people
+    - Topics: D3.js circle pack showing topic popularity with entity-colored bubbles
+    - People: D3.js radial layout showing people connections via shared topics
+    - Timeline: vis.js Timeline showing entries chronologically by entity type
+  - Added D3.js v7 and vis.js Timeline libraries
+  - Click-to-select shows detailed info in selection panel
+  - Entity and type filters for all views
+
+- **v3.0.13** - Grid column improvements
+  - Title and Notes columns now wider for better readability
+  - Status and Category columns hidden on All/Project/Knowledge pages (shown only on Tasks)
+  - Source column removed from grid (available in slide-out panel)
+  - Removed unused modal code for cleaner codebase
+
+- **v3.0.12** - AI Summary simplification
+  - AI Summary section now only shows if there is content (no more spinners)
+  - Removed AI polling logic - section hidden if no summary exists
+  - Fixed in both modal and slide-out detail panel
+
+- **v3.0.11** - Date and spinner fixes
+  - Fixed "Today" showing for yesterday's entries (now compares calendar dates, not 24-hour periods)
+  - Fixed AI spinner date parsing (timestamp format with space now handled correctly)
+  - Added NaN check for invalid dates
+
+- **v3.0.10** - AI spinner fix
+  - Fixed infinite spinner on old entries without AI summaries
+  - Spinner now only shows for entries created within last 5 minutes
+  - Old entries without AI summary no longer show the AI Summary section
+
+- **v3.0.9** - UI polish and task view improvements
+  - Stronger pastels: More saturated badge colours for better visibility
+  - Dashboard icons: Recent item icons now use full pastel background
+  - Task view toggle: List/Board now uses compact icon toggle
+  - Hide completed: Now an eye icon button instead of checkbox
+  - Removed duplicate task category filter
+  - Visualise date slider: Dual-handle range slider replaces date inputs
+  - Visualise buttons: Reset/Fit now icon-only
+  - Search page: Removed header text for cleaner look
+
+- **v3.0.8** - Grid UI improvements
+  - Pastel badge colours: All type, entity, and category badges now use softer pastel palette
+  - Row numbers: Added row number column to left of selection checkbox
+  - Category toggle buttons: Replaced category dropdown with All/Work/Personal toggle
+  - Cleaner header: White background, sort arrows only on hover (▲/▼)
+  - Sentence case headers: Column titles no longer uppercase
+  - Reduced row height: Compact row padding
+  - Icon-only toolbar buttons: Refresh and delete are now icon-only
+  - Entity filter visibility: Hidden on project/task/knowledge pages, shown on All
+  - Removed sources filter
+
+- **v3.0.7** - Settings consolidation
+  - Moved project folder setting from extension options to KB Viewer Settings
+  - Added browse button for project folder selection (uses native folder picker)
+  - Extension options page now only contains debug mode toggle
+  - Simplified extension options UI
+
+- **v3.0.6** - Settings page improvements
+  - General settings section: Project folder and Extension ID now editable in KB Viewer Settings
+  - Auto-update native manifest: Extension ID changes automatically update `com.ultrathink.kbsaver.json`
+  - Hash-based URL routing: Page state now persists in URL (e.g., `#tasks`, `#settings`)
+  - Browser refresh stays on current page instead of returning to home
+  - Browser back/forward buttons navigate between pages
+
+- **v3.0.5** - Task status improvements
+  - Status dropdown in detail panel: Change task status directly from the slide-over panel
+  - Clickable grid status: Click status badge in grid to cycle through statuses
+  - Disabled Done column: Grey out Done column when "Hide completed" is on, shows hidden count
+  - Completion toast: Shows "Task completed (X hidden)" when marking done with hide completed on
+  - Bug fix: Background refresh now updates kanban board, not just the table
+  - Bug fix: Prevent dropping tasks on Done column when hiding completed
+
+- **v3.0.4** - Task page filters
+  - Work/Personal toggle: Filter tasks by category on Tasks page
+  - Hide completed toggle: Checkbox to hide done tasks from grid and kanban
+  - Status column: New column in grid showing task status (Not started/In progress/Done)
+  - Completed task styling: Grey out completed tasks with strikethrough in grid and kanban
+
+- **v3.0.3** - Category badge colour update
+  - Changed category (work/personal) badge colour to #ff5200 (orange)
+
+- **v3.0.2** - Dashboard UI improvements
+  - Enhanced stat card icons with gradient backgrounds and shadows
+  - Improved quick action buttons with vertical layout and hover effects
+  - Type-specific colored icons in recent items list
+  - Replaced type breakdown boxes with interactive donut chart
+  - Consistent section title spacing and sentence case
+
+- **v3.0.1** - Navigation fixes
+  - Added "All" nav item in sidebar to show all entries grid
+  - Fixed initial page load to show dashboard instead of grid
+  - Added nav badge counts for All, Projects, Tasks, Knowledge
+
+- **v3.0.0** - Major UI Redesign
   - **Dashboard Home**: New home page with stats cards, quick actions, recent items, and type breakdown
   - **Slide-out Detail Panel**: Modern slide-out panel replaces modal for viewing entries (like Asana/Linear)
   - **Command Palette**: Cmd+K (or Ctrl+K) for quick navigation and entry search
