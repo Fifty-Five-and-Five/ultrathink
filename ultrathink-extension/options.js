@@ -37,11 +37,31 @@ function validateProjectFolder(path) {
   return { valid: true };
 }
 
-// Load saved settings
+// Load saved settings (settings.json via native host is source of truth)
 document.addEventListener('DOMContentLoaded', async () => {
-  const settings = await chrome.storage.sync.get(DEFAULT_SETTINGS);
-  document.getElementById('projectFolder').value = settings.projectFolder;
-  document.getElementById('debugMode').checked = settings.debugMode || false;
+  // Load project folder from native host (settings.json is only source)
+  try {
+    const response = await chrome.runtime.sendMessage({ action: 'getSettings' });
+    if (response?.success) {
+      document.getElementById('projectFolder').value = response.project_folder || '';
+    } else {
+      // Show error if native host unavailable
+      const statusEl = document.getElementById('status');
+      statusEl.textContent = 'Native host unavailable. Please ensure UltraThink widget is installed.';
+      statusEl.className = 'status error';
+      statusEl.style.display = 'block';
+    }
+  } catch (error) {
+    console.error('Failed to load settings from native host:', error);
+    const statusEl = document.getElementById('status');
+    statusEl.textContent = 'Failed to connect to native host.';
+    statusEl.className = 'status error';
+    statusEl.style.display = 'block';
+  }
+
+  // Load debugMode from chrome.storage (extension-specific setting only)
+  const localSettings = await chrome.storage.sync.get({ debugMode: false });
+  document.getElementById('debugMode').checked = localSettings.debugMode || false;
 
   // Setup save button
   document.getElementById('saveBtn').addEventListener('click', saveSettings);
@@ -91,15 +111,32 @@ async function saveSettings() {
     normalizedPath += normalizedPath.includes('\\') ? '\\' : '/';
   }
 
-  // Save to storage
-  await chrome.storage.sync.set({
-    projectFolder: normalizedPath,
-    debugMode: debugMode
-  });
+  // Save project folder to native host (settings.json is only source)
+  try {
+    const response = await chrome.runtime.sendMessage({
+      action: 'saveSettings',
+      settings: { project_folder: normalizedPath }
+    });
+    if (!response?.success) {
+      statusEl.textContent = response?.error || 'Failed to save settings';
+      statusEl.className = 'status error';
+      statusEl.style.display = 'block';
+      return;
+    }
+  } catch (error) {
+    statusEl.textContent = 'Failed to connect to native host';
+    statusEl.className = 'status error';
+    statusEl.style.display = 'block';
+    return;
+  }
+
+  // Save debugMode to chrome.storage (extension-specific setting only)
+  await chrome.storage.sync.set({ debugMode: debugMode });
 
   // Show success message
   statusEl.textContent = 'Settings saved successfully!';
   statusEl.className = 'status success';
+  statusEl.style.display = 'block';
 
   // Update input with normalized path
   document.getElementById('projectFolder').value = normalizedPath;

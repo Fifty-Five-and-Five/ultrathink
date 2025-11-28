@@ -103,6 +103,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       .then(result => sendResponse(result))
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
+  } else if (request.action === 'getSettings') {
+    // Get settings from native host (settings.json is source of truth)
+    sendNativeMessage({ action: 'get_settings' })
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  } else if (request.action === 'saveSettings') {
+    // Save settings to native host (settings.json is source of truth)
+    sendNativeMessage({ action: 'save_settings', settings: request.settings })
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
   }
 });
 

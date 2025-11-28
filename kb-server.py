@@ -21,7 +21,34 @@ from pathlib import Path
 from urllib.parse import urlparse, unquote, parse_qs
 
 PORT = 8080
-PROJECT_FOLDER = Path(__file__).parent
+
+# Cache for project folder (loaded once at startup)
+_PROJECT_FOLDER_CACHE = None
+
+
+def get_project_folder():
+    """Get project folder from settings.json (single source of truth)."""
+    global _PROJECT_FOLDER_CACHE
+    if _PROJECT_FOLDER_CACHE is not None:
+        return _PROJECT_FOLDER_CACHE
+
+    # Try to load from settings.json
+    settings_path = Path(__file__).parent / 'native-host' / 'settings.json'
+    if settings_path.exists():
+        try:
+            with open(settings_path, 'r') as f:
+                settings = json.load(f)
+                folder = settings.get('project_folder')
+                if folder:
+                    _PROJECT_FOLDER_CACHE = Path(folder)
+                    return _PROJECT_FOLDER_CACHE
+        except Exception:
+            pass
+
+    # Fallback to script's parent directory
+    _PROJECT_FOLDER_CACHE = Path(__file__).parent
+    return _PROJECT_FOLDER_CACHE
+
 
 # In-memory log store for API calls (max 500 entries, FIFO)
 API_LOGS = []
@@ -86,6 +113,9 @@ READTIME_PATTERN = re.compile(r'^  - ReadTime: (\d+) min$')
 # Task status pattern
 TASKSTATUS_PATTERN = re.compile(r'^  - Status: (.+)$')
 
+# Category pattern (work/personal)
+CATEGORY_PATTERN = re.compile(r'^  - Category: (.+)$')
+
 
 def parse_kb_markdown(content):
     """Parse kb.md content into list of entry objects.
@@ -127,6 +157,7 @@ def parse_kb_markdown(content):
                 'entity': '',
                 'topics': [],
                 'people': [],
+                'category': '',  # work or personal
                 # Page metadata (optional)
                 'description': '',
                 'ogImage': '',
@@ -167,6 +198,7 @@ def parse_kb_markdown(content):
                 'entity': '',
                 'topics': [],
                 'people': [],
+                'category': '',  # work or personal
                 # Page metadata (optional)
                 'description': '',
                 'ogImage': '',
@@ -228,6 +260,9 @@ def parse_kb_markdown(content):
                 # Check for Status (task kanban status)
                 elif content_line.startswith('Status: '):
                     current_entry['taskStatus'] = content_line[8:]
+                # Check for Category (work/personal)
+                elif content_line.startswith('Category: '):
+                    current_entry['category'] = content_line[10:]
                 # Check for screenshot
                 elif SCREENSHOT_PATTERN.match(content_line):
                     screenshot_match = SCREENSHOT_PATTERN.match(content_line)
@@ -264,7 +299,7 @@ def parse_kb_markdown(content):
 
 def delete_entry(timestamp):
     """Delete entry with matching timestamp from kb.md and associated files."""
-    kb_file = PROJECT_FOLDER / 'kb.md'
+    kb_file = get_project_folder() / 'kb.md'
     if not kb_file.exists():
         return {'success': False, 'error': 'kb.md not found'}
 
@@ -310,7 +345,7 @@ def delete_entry(timestamp):
     if deleted:
         # Delete associated files
         for file_path in files_to_delete:
-            full_path = PROJECT_FOLDER / file_path
+            full_path = get_project_folder() / file_path
             if full_path.exists():
                 try:
                     full_path.unlink()
@@ -328,7 +363,7 @@ def delete_entry(timestamp):
 
 def update_entry_status(timestamp, status):
     """Update task status for entry with matching timestamp in kb.md."""
-    kb_file = PROJECT_FOLDER / 'kb.md'
+    kb_file = get_project_folder() / 'kb.md'
     if not kb_file.exists():
         return {'success': False, 'error': 'kb.md not found'}
 
@@ -933,7 +968,7 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
 
         if path == '/api/entries':
             # Return parsed kb.md entries
-            kb_file = PROJECT_FOLDER / 'kb.md'
+            kb_file = get_project_folder() / 'kb.md'
             if not kb_file.exists():
                 self.send_json([])
                 return
@@ -946,7 +981,7 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
 
         elif path == '/api/topics':
             # Return all topics from topics.json
-            topics_file = PROJECT_FOLDER / 'topics.json'
+            topics_file = get_project_folder() / 'topics.json'
             if topics_file.exists():
                 with open(topics_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
@@ -956,7 +991,7 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
 
         elif path == '/api/entities':
             # Return all entities (people & roles) from entities.json
-            entities_file = PROJECT_FOLDER / 'entities.json'
+            entities_file = get_project_folder() / 'entities.json'
             if entities_file.exists():
                 with open(entities_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
@@ -979,7 +1014,7 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
 
         elif path == '/api/settings':
             # Return settings from native-host/settings.json (masks sensitive tokens)
-            settings_file = PROJECT_FOLDER / 'native-host' / 'settings.json'
+            settings_file = get_project_folder() / 'native-host' / 'settings.json'
             if settings_file.exists():
                 with open(settings_file, 'r', encoding='utf-8') as f:
                     settings = json.load(f)
@@ -1005,7 +1040,7 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
                 {'id': 'in-progress', 'name': 'In progress', 'color': '#3b82f6'},
                 {'id': 'done', 'name': 'Done', 'color': '#22c55e'}
             ]
-            columns_file = PROJECT_FOLDER / 'kanban-columns.json'
+            columns_file = get_project_folder() / 'kanban-columns.json'
             if columns_file.exists():
                 with open(columns_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
@@ -1016,7 +1051,7 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
         elif path.startswith('/api/entries/'):
             # Return single entry by timestamp
             timestamp = unquote(path.split('/api/entries/')[1])
-            kb_file = PROJECT_FOLDER / 'kb.md'
+            kb_file = get_project_folder() / 'kb.md'
             if not kb_file.exists():
                 self.send_json({'error': 'kb.md not found'}, 404)
                 return
@@ -1033,23 +1068,23 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
 
         elif path == '/' or path == '/kb-viewer.html':
             # Serve main HTML page
-            self.send_file(PROJECT_FOLDER / 'kb-viewer.html')
+            self.send_file(get_project_folder() / 'kb-viewer.html')
 
         elif path == '/kb-viewer.js':
             # Serve JavaScript file
-            self.send_file(PROJECT_FOLDER / 'kb-viewer.js')
+            self.send_file(get_project_folder() / 'kb-viewer.js')
 
         elif path.startswith('/screenshots/'):
             # Serve screenshot files
-            self.send_file(PROJECT_FOLDER / path[1:])
+            self.send_file(get_project_folder() / path[1:])
 
         elif path.startswith('/files/'):
             # Serve uploaded files
-            self.send_file(PROJECT_FOLDER / path[1:])
+            self.send_file(get_project_folder() / path[1:])
 
         elif path.startswith('/ultrathink-extension/'):
             # Serve extension assets (icons)
-            self.send_file(PROJECT_FOLDER / path[1:])
+            self.send_file(get_project_folder() / path[1:])
 
         else:
             self.send_error(404, 'Not found')
@@ -1070,7 +1105,7 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json({'success': False, 'error': 'Name required'}, 400)
                 return
 
-            topics_file = PROJECT_FOLDER / 'topics.json'
+            topics_file = get_project_folder() / 'topics.json'
             topics = []
             if topics_file.exists():
                 with open(topics_file, 'r', encoding='utf-8') as f:
@@ -1093,7 +1128,7 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json({'success': False, 'error': 'Name required'}, 400)
                 return
 
-            entities_file = PROJECT_FOLDER / 'entities.json'
+            entities_file = get_project_folder() / 'entities.json'
             entities = []
             if entities_file.exists():
                 with open(entities_file, 'r', encoding='utf-8') as f:
@@ -1120,7 +1155,7 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json({'success': False, 'error': 'Column id and name required'}, 400)
                 return
 
-            columns_file = PROJECT_FOLDER / 'kanban-columns.json'
+            columns_file = get_project_folder() / 'kanban-columns.json'
             default_columns = [
                 {'id': 'not-started', 'name': 'Not started', 'color': '#6b7280'},
                 {'id': 'in-progress', 'name': 'In progress', 'color': '#3b82f6'},
@@ -1153,7 +1188,7 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
                     return
 
                 # Load settings from native-host/settings.json
-                settings_file = PROJECT_FOLDER / 'native-host' / 'settings.json'
+                settings_file = get_project_folder() / 'native-host' / 'settings.json'
                 if not settings_file.exists():
                     self.send_json({'success': False, 'error': 'Settings file not found. Configure GitHub token in native-host/settings.json'}, 400)
                     return
@@ -1213,7 +1248,7 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
                     return
 
                 # Load settings from native-host/settings.json
-                settings_file = PROJECT_FOLDER / 'native-host' / 'settings.json'
+                settings_file = get_project_folder() / 'native-host' / 'settings.json'
                 if not settings_file.exists():
                     self.send_json({'success': False, 'error': 'Settings file not found. Configure Notion token in native-host/settings.json'}, 400)
                     return
@@ -1269,7 +1304,7 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
                     return
 
                 # Load settings from native-host/settings.json
-                settings_file = PROJECT_FOLDER / 'native-host' / 'settings.json'
+                settings_file = get_project_folder() / 'native-host' / 'settings.json'
                 if not settings_file.exists():
                     self.send_json({'success': False, 'error': 'Settings file not found. Configure Fastmail token in native-host/settings.json'}, 400)
                     return
@@ -1324,7 +1359,7 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
                     return
 
                 # Load settings from native-host/settings.json
-                settings_file = PROJECT_FOLDER / 'native-host' / 'settings.json'
+                settings_file = get_project_folder() / 'native-host' / 'settings.json'
                 if not settings_file.exists():
                     self.send_json({'success': False, 'error': 'Settings file not found. Configure Capsule token in native-host/settings.json'}, 400)
                     return
@@ -1389,7 +1424,7 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json({'success': False, 'error': 'Columns required'}, 400)
                 return
 
-            columns_file = PROJECT_FOLDER / 'kanban-columns.json'
+            columns_file = get_project_folder() / 'kanban-columns.json'
             with open(columns_file, 'w', encoding='utf-8') as f:
                 json.dump({'columns': columns}, f, indent=2)
             self.send_json({'success': True})
@@ -1401,7 +1436,7 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json({'success': False, 'error': 'Names required'}, 400)
                 return
 
-            topics_file = PROJECT_FOLDER / 'topics.json'
+            topics_file = get_project_folder() / 'topics.json'
             if not topics_file.exists():
                 self.send_json({'success': False, 'error': 'Not found'}, 404)
                 return
@@ -1427,7 +1462,7 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json({'success': False, 'error': 'Names required'}, 400)
                 return
 
-            entities_file = PROJECT_FOLDER / 'entities.json'
+            entities_file = get_project_folder() / 'entities.json'
             if not entities_file.exists():
                 self.send_json({'success': False, 'error': 'Not found'}, 404)
                 return
@@ -1449,7 +1484,7 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
         elif parsed.path == '/api/settings':
             # Update settings in native-host/settings.json
             # Only update fields that are provided and not masked
-            settings_file = PROJECT_FOLDER / 'native-host' / 'settings.json'
+            settings_file = get_project_folder() / 'native-host' / 'settings.json'
 
             # Load existing settings
             if settings_file.exists():
@@ -1525,7 +1560,7 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json({'success': False, 'error': 'Name required'}, 400)
                 return
 
-            topics_file = PROJECT_FOLDER / 'topics.json'
+            topics_file = get_project_folder() / 'topics.json'
             if not topics_file.exists():
                 self.send_json({'success': False, 'error': 'Not found'}, 404)
                 return
@@ -1549,7 +1584,7 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json({'success': False, 'error': 'Name required'}, 400)
                 return
 
-            entities_file = PROJECT_FOLDER / 'entities.json'
+            entities_file = get_project_folder() / 'entities.json'
             if not entities_file.exists():
                 self.send_json({'success': False, 'error': 'Not found'}, 404)
                 return
@@ -1578,7 +1613,7 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
                 self.send_json({'success': False, 'error': 'Cannot delete default columns'}, 400)
                 return
 
-            columns_file = PROJECT_FOLDER / 'kanban-columns.json'
+            columns_file = get_project_folder() / 'kanban-columns.json'
             if not columns_file.exists():
                 self.send_json({'success': False, 'error': 'Not found'}, 404)
                 return
@@ -1608,12 +1643,13 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
 
 def main():
     """Start the HTTP server and open browser."""
-    os.chdir(PROJECT_FOLDER)
+    project_folder = get_project_folder()
+    os.chdir(project_folder)
 
     # Check if kb-viewer.html exists
-    viewer_file = PROJECT_FOLDER / 'kb-viewer.html'
+    viewer_file = project_folder / 'kb-viewer.html'
     if not viewer_file.exists():
-        print(f"Error: kb-viewer.html not found in {PROJECT_FOLDER}")
+        print(f"Error: kb-viewer.html not found in {project_folder}")
         return
 
     with http.server.HTTPServer(('', PORT), KBHandler) as server:

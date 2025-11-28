@@ -12,16 +12,13 @@
 const HOST_NAME = 'com.ultrathink.kbsaver';
 
 /**
- * Default extension settings - single source of truth.
- * These values are used when settings haven't been configured yet.
- * Note: API keys and AI prompts are now stored in native-host/settings.json
- * and configured via KB Viewer Settings page.
+ * Default extension settings.
+ * Note: projectFolder is now stored in native-host/settings.json (single source of truth).
+ * Only extension-specific settings like debugMode remain in chrome.storage.
  * @constant {Object}
- * @property {string} projectFolder - Default folder path for storing kb.md and files
  * @property {boolean} debugMode - Whether to enable verbose console logging
  */
 const DEFAULT_SETTINGS = {
-  projectFolder: 'C:\\Users\\ChrisWright\\OneDrive - Fifty Five and Five\\dev\\ultrathink\\',
   debugMode: false
 };
 
@@ -138,18 +135,63 @@ const FILE_EXTENSION_MAP = {
 // =============================================================================
 
 /**
- * Retrieves extension settings from Chrome sync storage.
- * Falls back to DEFAULT_SETTINGS for any missing values.
+ * Retrieves extension settings.
+ * projectFolder comes from native host (settings.json is source of truth).
+ * debugMode comes from chrome.storage.sync (extension-specific).
  *
  * @async
  * @function getSettings
- * @returns {Promise<Object>} Settings object with projectFolder, openaiKey, and debugMode
+ * @returns {Promise<Object>} Settings object with projectFolder, debugMode, and API tokens
  * @example
  * const settings = await getSettings();
  * console.log(settings.projectFolder); // "C:\Users\..."
  */
 async function getSettings() {
-  return chrome.storage.sync.get(DEFAULT_SETTINGS);
+  // Get extension-specific settings from chrome.storage
+  const localSettings = await chrome.storage.sync.get(DEFAULT_SETTINGS);
+
+  // Get projectFolder and API keys from native host (settings.json)
+  try {
+    const nativeSettings = await new Promise((resolve, reject) => {
+      chrome.runtime.sendNativeMessage(HOST_NAME, { action: 'get_settings' }, (response) => {
+        if (chrome.runtime.lastError) {
+          reject(chrome.runtime.lastError);
+        } else {
+          resolve(response);
+        }
+      });
+    });
+
+    if (nativeSettings?.success) {
+      return {
+        projectFolder: nativeSettings.project_folder || '',
+        debugMode: localSettings.debugMode || false,
+        // API tokens from settings.json
+        githubToken: nativeSettings.github_token || '',
+        githubOrg: nativeSettings.github_org || '',
+        githubRepos: nativeSettings.github_repos || '',
+        notionToken: nativeSettings.notion_token || '',
+        fastmailToken: nativeSettings.fastmail_token || '',
+        capsuleToken: nativeSettings.capsule_token || '',
+        openaiKey: nativeSettings.openai_api_key || ''
+      };
+    }
+  } catch (error) {
+    console.error('Failed to get settings from native host:', error);
+  }
+
+  // Fallback if native host unavailable
+  return {
+    projectFolder: '',
+    debugMode: localSettings.debugMode || false,
+    githubToken: '',
+    githubOrg: '',
+    githubRepos: '',
+    notionToken: '',
+    fastmailToken: '',
+    capsuleToken: '',
+    openaiKey: ''
+  };
 }
 
 /**

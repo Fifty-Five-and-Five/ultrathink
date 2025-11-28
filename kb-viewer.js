@@ -18,6 +18,15 @@ const ENTITY_COLORS = {
 };
 
 /**
+ * Category badge color mappings (work/personal)
+ * @constant {Object<string, string>}
+ */
+const CATEGORY_COLORS = {
+    work: '#3b82f6',          // Blue
+    personal: '#10b981'       // Green
+};
+
+/**
  * Type badge color mappings - clean, modern palette
  * @constant {Object<string, string>}
  */
@@ -248,6 +257,12 @@ function initTable(entries) {
                 width: 100
             },
             {
+                title: "Category",
+                field: "category",
+                formatter: categoryBadgeFormatter,
+                width: 90
+            },
+            {
                 title: "Topics",
                 field: "topics",
                 formatter: topicsFormatter,
@@ -297,7 +312,7 @@ function initTable(entries) {
             target.type === 'checkbox') {
             return;
         }
-        openModal(row.getData());
+        openDetailPanel(row.getData());
     });
 }
 
@@ -420,6 +435,17 @@ function entityBadgeFormatter(cell) {
 
     const color = ENTITY_COLORS[entity] || ENTITY_COLORS.unclassified;
     return `<span class="entity-badge" style="background:${color}">${escapeHtml(entity)}</span>`;
+}
+
+/**
+ * Custom formatter for category (work/personal)
+ */
+function categoryBadgeFormatter(cell) {
+    const category = cell.getValue();
+    if (!category) return '';
+
+    const color = CATEGORY_COLORS[category] || '#6b7280';
+    return `<span class="type-badge" style="background-color:${color}">${escapeHtml(category)}</span>`;
 }
 
 /**
@@ -938,6 +964,7 @@ function applyFilters() {
     const typeFilter = document.getElementById('filterType').value;
     const sourceFilter = document.getElementById('filterSource').value;
     const entityFilter = document.getElementById('filterEntity')?.value || '';
+    const categoryFilter = document.getElementById('filterCategory')?.value || '';
     const searchValue = document.getElementById('search').value.toLowerCase();
 
     table.setFilter(function(data) {
@@ -950,6 +977,9 @@ function applyFilters() {
         // Entity filter
         if (entityFilter && data.entity !== entityFilter) return false;
 
+        // Category filter
+        if (categoryFilter && data.category !== categoryFilter) return false;
+
         // Search filter
         if (searchValue) {
             // Check basic fields
@@ -959,7 +989,8 @@ function applyFilters() {
                 (data.type && data.type.toLowerCase().includes(searchValue)) ||
                 (data.source && data.source.toLowerCase().includes(searchValue)) ||
                 (data.url && data.url.toLowerCase().includes(searchValue)) ||
-                (data.entity && data.entity.toLowerCase().includes(searchValue))
+                (data.entity && data.entity.toLowerCase().includes(searchValue)) ||
+                (data.category && data.category.toLowerCase().includes(searchValue))
             );
 
             // Check topics array
@@ -996,6 +1027,12 @@ function setupEventListeners() {
     const entityFilter = document.getElementById('filterEntity');
     if (entityFilter) {
         entityFilter.addEventListener('change', applyFilters);
+    }
+
+    // Category filter
+    const categoryFilter = document.getElementById('filterCategory');
+    if (categoryFilter) {
+        categoryFilter.addEventListener('change', applyFilters);
     }
 
     // Refresh button
@@ -1154,6 +1191,7 @@ function navigateToPage(page, filterContext = null) {
     document.getElementById('gridContainer').style.display = 'none';
     document.getElementById('kanbanContainer').classList.remove('active');
     document.querySelector('.toolbar').style.display = 'none';
+    document.getElementById('dashboardPage').classList.remove('active');
     document.getElementById('topicsPage').classList.remove('active');
     document.getElementById('peoplePage').classList.remove('active');
     document.getElementById('visualisePage').classList.remove('active');
@@ -1167,7 +1205,10 @@ function navigateToPage(page, filterContext = null) {
     document.getElementById('viewToggle').style.display = 'none';
 
     // Show appropriate content
-    if (page === 'topics') {
+    if (page === 'home') {
+        document.getElementById('dashboardPage').classList.add('active');
+        updateDashboard();
+    } else if (page === 'topics') {
         document.getElementById('topicsPage').classList.add('active');
         renderTopicsList();
     } else if (page === 'people') {
@@ -1186,13 +1227,11 @@ function navigateToPage(page, filterContext = null) {
         document.getElementById('logsPage').classList.add('active');
         initLogsPage();
     } else {
-        // Show toolbar for home, project, task, knowledge
+        // Show toolbar for project, task, knowledge
         document.querySelector('.toolbar').style.display = 'flex';
 
         // Apply entity filter based on page
-        if (page === 'home') {
-            document.getElementById('filterEntity').value = '';
-        } else if (page === 'project') {
+        if (page === 'project') {
             document.getElementById('filterEntity').value = 'project';
         } else if (page === 'task') {
             document.getElementById('filterEntity').value = 'task';
@@ -1720,7 +1759,7 @@ function buildNetwork() {
             const nodeId = params.nodes[0];
             const node = visNodes.get(nodeId);
             if (node && node.entryData) {
-                openModal(node.entryData);
+                openDetailPanel(node.entryData);
             }
         }
     });
@@ -2304,7 +2343,7 @@ function renderKanbanCard(task) {
     }
 
     return `
-        <div class="kanban-card" draggable="true" data-timestamp="${escapeHtml(task.timestamp)}" onclick="openModal(allEntries.find(e => e.timestamp === '${escapeHtml(task.timestamp)}'))">
+        <div class="kanban-card" draggable="true" data-timestamp="${escapeHtml(task.timestamp)}" onclick="openDetailPanel(allEntries.find(e => e.timestamp === '${escapeHtml(task.timestamp)}'))">
             <div class="kanban-card-title">${titleHtml}</div>
             <div class="kanban-card-meta">
                 <span class="type-badge" style="background:${typeColor};font-size:10px;padding:2px 6px">${escapeHtml(task.type)}</span>
@@ -3619,3 +3658,833 @@ function formatLogTime(isoString) {
         return isoString;
     }
 }
+
+// =========================================
+// SLIDE-OUT DETAIL PANEL
+// =========================================
+
+/** Currently displayed entry in detail panel */
+let currentDetailEntry = null;
+
+/**
+ * Get icon SVG for entry type
+ * @param {string} type - Entry type
+ * @returns {string} SVG markup
+ */
+function getTypeIcon(type) {
+    const icons = {
+        link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+        idea: '<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>',
+        task: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>',
+        file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>',
+        image: '<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>',
+        video: '<polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>',
+        audio: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
+        screenshot: '<rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>',
+        pdf: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>'
+    };
+    return icons[type] || icons.link;
+}
+
+/**
+ * Open slide-out detail panel with entry details
+ * @param {Object} entry - The KB entry to display
+ */
+function openDetailPanel(entry) {
+    currentDetailEntry = entry;
+    const panel = document.getElementById('detailPanel');
+    const bodyEl = document.getElementById('detailBody');
+    const typeText = document.getElementById('detailTypeText');
+    const typeBadge = document.getElementById('detailTypeBadge');
+
+    // Update type badge
+    typeText.textContent = entry.type.charAt(0).toUpperCase() + entry.type.slice(1);
+    typeBadge.querySelector('svg').innerHTML = getTypeIcon(entry.type);
+
+    // Build body content
+    let bodyHtml = '';
+
+    // Title section
+    bodyHtml += `
+        <div class="detail-title">
+            ${entry.url
+                ? `<a href="${escapeHtml(entry.url)}" target="_blank">${escapeHtml(entry.title) || '(untitled)'}</a>`
+                : escapeHtml(entry.title) || '(untitled)'}
+        </div>
+    `;
+
+    // Meta info
+    const metaParts = [];
+    if (entry.source) metaParts.push(entry.source);
+    if (entry.timestamp) {
+        const date = new Date(entry.timestamp.replace(/(\d{4}-\d{2}-\d{2})_(\d{2})-(\d{2})-(\d{2})/, '$1T$2:$3:$4'));
+        metaParts.push(date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }));
+    }
+    if (metaParts.length > 0) {
+        bodyHtml += `<div class="detail-meta">${metaParts.join(' • ')}</div>`;
+    }
+
+    // Entity and type badges
+    bodyHtml += `<div class="detail-badges">`;
+    if (entry.entity) {
+        bodyHtml += `<span class="entity-badge" style="background:${ENTITY_COLORS[entry.entity] || ENTITY_COLORS.unclassified}">${escapeHtml(entry.entity)}</span>`;
+    }
+    bodyHtml += `<span class="type-badge" style="background:${TYPE_COLORS[entry.type] || '#64748b'}">${escapeHtml(entry.type)}</span>`;
+    bodyHtml += `</div>`;
+
+    // Tags (topics + people)
+    const hasTags = (entry.topics && entry.topics.length > 0) || (entry.people && entry.people.length > 0);
+    if (hasTags) {
+        bodyHtml += `<div class="detail-tags">`;
+        if (entry.topics && Array.isArray(entry.topics)) {
+            bodyHtml += entry.topics.map(t => `<span class="topic-tag">${escapeHtml(t)}</span>`).join('');
+        }
+        if (entry.people && Array.isArray(entry.people)) {
+            bodyHtml += entry.people.map(p => `<span class="person-tag">${escapeHtml(p)}</span>`).join('');
+        }
+        bodyHtml += `</div>`;
+    }
+
+    // Snippet (selected text)
+    if (entry.selectedText) {
+        bodyHtml += `
+            <div class="detail-section detail-snippet-section">
+                <div class="detail-section-header">
+                    <h4>Snippet</h4>
+                    <button class="detail-copy-btn" onclick="copyDetailContent('snippet')" title="Copy">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                        </svg>
+                    </button>
+                </div>
+                <div class="detail-snippet-text">${escapeHtml(entry.selectedText)}</div>
+            </div>
+        `;
+    }
+
+    // Notes section
+    if (entry.content) {
+        bodyHtml += `
+            <div class="detail-section detail-notes-section">
+                <div class="detail-section-header">
+                    <h4>My Notes</h4>
+                    <button class="detail-copy-btn" onclick="copyDetailContent('notes')" title="Copy">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                        </svg>
+                    </button>
+                </div>
+                <div class="detail-notes-text">${renderMarkdown(entry.content)}</div>
+            </div>
+        `;
+    }
+
+    // AI Summary
+    const NO_SUMMARY_TYPES = ['video'];
+    const shouldHaveAiSummary = !NO_SUMMARY_TYPES.includes(entry.type);
+
+    if (entry.aiSummary) {
+        bodyHtml += `
+            <div class="detail-section detail-ai-section">
+                <div class="detail-section-header">
+                    <h4>AI Summary</h4>
+                    <button class="detail-copy-btn" onclick="copyDetailContent('ai')" title="Copy">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                        </svg>
+                    </button>
+                </div>
+                <div class="detail-ai-text">${escapeHtml(entry.aiSummary)}</div>
+            </div>
+        `;
+    } else if (shouldHaveAiSummary) {
+        bodyHtml += `
+            <div class="detail-section detail-ai-section">
+                <div class="detail-section-header">
+                    <h4>AI Summary <span class="ai-processing-spinner" title="Processing..."></span></h4>
+                </div>
+                <div class="detail-ai-text"></div>
+            </div>
+        `;
+    }
+
+    // Media content (screenshot, file preview)
+    if (entry.screenshot) {
+        bodyHtml += `
+            <div class="detail-section detail-media-section">
+                <img src="/${escapeHtml(entry.screenshot)}" class="detail-screenshot"
+                     onclick="window.open('/${escapeHtml(entry.screenshot)}', '_blank')"
+                     title="Click to view full size">
+            </div>
+        `;
+    }
+
+    if (entry.file) {
+        const fileName = entry.file.split('/').pop();
+        const ext = fileName.split('.').pop().toLowerCase();
+        const filePath = `/${escapeHtml(entry.file)}`;
+
+        const audioExts = ['wav', 'mp3', 'ogg', 'flac', 'aac', 'm4a'];
+        const videoExts = ['mp4', 'webm', 'ogv', 'mov', 'avi'];
+        const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp'];
+        const textExts = ['txt', 'md', 'js', 'ts', 'jsx', 'tsx', 'py', 'css', 'html', 'json', 'xml', 'yaml', 'yml', 'sh', 'bash', 'sql', 'csv', 'log'];
+        const isPdf = ext === 'pdf';
+
+        if (audioExts.includes(ext)) {
+            bodyHtml += `
+                <div class="detail-section detail-media-section">
+                    <audio controls class="detail-audio">
+                        <source src="${filePath}" type="audio/${ext === 'mp3' ? 'mpeg' : ext}">
+                    </audio>
+                </div>
+            `;
+        } else if (videoExts.includes(ext)) {
+            bodyHtml += `
+                <div class="detail-section detail-media-section">
+                    <video controls class="detail-video">
+                        <source src="${filePath}" type="video/${ext === 'mov' ? 'quicktime' : ext}">
+                    </video>
+                </div>
+            `;
+        } else if (imageExts.includes(ext)) {
+            bodyHtml += `
+                <div class="detail-section detail-media-section">
+                    <img src="${filePath}" class="detail-screenshot"
+                         onclick="window.open('${filePath}', '_blank')"
+                         title="Click to view full size">
+                </div>
+            `;
+        } else if (isPdf) {
+            bodyHtml += `
+                <div class="detail-section detail-media-section">
+                    <iframe src="${filePath}" class="detail-pdf-viewer"></iframe>
+                </div>
+            `;
+        } else if (textExts.includes(ext)) {
+            bodyHtml += `
+                <div class="detail-section detail-media-section">
+                    <pre class="detail-code-preview" data-file="${filePath}">Loading...</pre>
+                </div>
+            `;
+        }
+    }
+
+    // Page info (OG image, description)
+    const hasPageInfo = entry.description || entry.ogImage || entry.author || entry.publishedDate || entry.readingTime;
+    if (hasPageInfo) {
+        bodyHtml += `<div class="detail-section detail-page-info">`;
+        bodyHtml += `<h4>Page Info</h4>`;
+
+        if (entry.ogImage) {
+            bodyHtml += `
+                <div class="detail-og-image">
+                    <img src="${escapeHtml(entry.ogImage)}" alt="Preview"
+                         onerror="this.parentElement.style.display='none'"
+                         onclick="window.open('${escapeHtml(entry.ogImage)}', '_blank')">
+                </div>
+            `;
+        }
+
+        if (entry.description) {
+            bodyHtml += `<div class="detail-page-desc">${escapeHtml(entry.description)}</div>`;
+        }
+
+        const pageMetaParts = [];
+        if (entry.author) pageMetaParts.push(`Author: ${escapeHtml(entry.author)}`);
+        if (entry.publishedDate) pageMetaParts.push(`Published: ${escapeHtml(entry.publishedDate)}`);
+        if (entry.readingTime && entry.readingTime > 0) pageMetaParts.push(`~${entry.readingTime} min read`);
+        if (pageMetaParts.length > 0) {
+            bodyHtml += `<div class="detail-page-meta">${pageMetaParts.join(' • ')}</div>`;
+        }
+
+        bodyHtml += `</div>`;
+    }
+
+    bodyEl.innerHTML = bodyHtml;
+
+    // Open panel
+    panel.setAttribute('data-open', 'true');
+    document.body.style.overflow = 'hidden';
+
+    // Set up action buttons
+    const openUrlBtn = document.getElementById('detailOpenUrl');
+    const copyUrlBtn = document.getElementById('detailCopyUrl');
+    const deleteBtn = document.getElementById('detailDelete');
+
+    if (entry.url) {
+        openUrlBtn.style.display = '';
+        openUrlBtn.onclick = () => window.open(entry.url, '_blank');
+        copyUrlBtn.style.display = '';
+        copyUrlBtn.onclick = () => {
+            navigator.clipboard.writeText(entry.url);
+            showToast('URL copied to clipboard');
+        };
+    } else {
+        openUrlBtn.style.display = 'none';
+        copyUrlBtn.style.display = 'none';
+    }
+
+    deleteBtn.onclick = () => {
+        if (confirm('Delete this entry?')) {
+            deleteEntry(entry.timestamp);
+            closeDetailPanel();
+        }
+    };
+
+    // Load text file content if needed
+    const codePreview = bodyEl.querySelector('.detail-code-preview');
+    if (codePreview) {
+        const filePath = codePreview.dataset.file;
+        fetch(filePath)
+            .then(r => r.text())
+            .then(text => {
+                const lines = text.split('\n');
+                const preview = lines.slice(0, 200).join('\n');
+                codePreview.textContent = preview + (lines.length > 200 ? '\n\n... (' + (lines.length - 200) + ' more lines)' : '');
+            })
+            .catch(() => {
+                codePreview.textContent = 'Failed to load file';
+            });
+    }
+
+    // Start AI polling if needed
+    if (!entry.aiSummary && shouldHaveAiSummary) {
+        startAiPolling(entry.timestamp);
+    }
+
+    // Handle escape key
+    document.addEventListener('keydown', handleDetailPanelEscape);
+}
+
+/**
+ * Close slide-out detail panel
+ */
+function closeDetailPanel() {
+    const panel = document.getElementById('detailPanel');
+    panel.setAttribute('data-open', 'false');
+    document.body.style.overflow = '';
+    currentDetailEntry = null;
+    stopAiPolling();
+    document.removeEventListener('keydown', handleDetailPanelEscape);
+}
+
+/**
+ * Handle escape key for detail panel
+ * @param {KeyboardEvent} e
+ */
+function handleDetailPanelEscape(e) {
+    if (e.key === 'Escape') {
+        closeDetailPanel();
+    }
+}
+
+/**
+ * Copy content from detail panel section
+ * @param {string} type - 'snippet', 'notes', or 'ai'
+ */
+function copyDetailContent(type) {
+    if (!currentDetailEntry) return;
+
+    let text = '';
+    if (type === 'snippet') {
+        text = currentDetailEntry.selectedText || '';
+    } else if (type === 'notes') {
+        text = currentDetailEntry.content || '';
+    } else if (type === 'ai') {
+        text = currentDetailEntry.aiSummary || '';
+    }
+
+    navigator.clipboard.writeText(text).then(() => {
+        showToast('Copied to clipboard');
+    });
+}
+
+// =========================================
+// DASHBOARD HOME PAGE
+// =========================================
+
+/**
+ * Simple navigation helper
+ * @param {string} page - Page name to navigate to
+ */
+function navigateTo(page) {
+    navigateToPage(page);
+}
+
+/**
+ * Update dashboard with current data
+ */
+function updateDashboard() {
+    // Update greeting based on time of day
+    const hour = new Date().getHours();
+    let greeting = 'Good morning';
+    if (hour >= 12 && hour < 17) greeting = 'Good afternoon';
+    else if (hour >= 17) greeting = 'Good evening';
+    document.getElementById('dashboardGreeting').textContent = greeting;
+
+    // Update stats
+    const stats = getDashboardStats();
+    document.getElementById('statTotalEntries').textContent = stats.total;
+    document.getElementById('statTasks').textContent = stats.tasks;
+    document.getElementById('statLinks').textContent = stats.links;
+    document.getElementById('statIdeas').textContent = stats.ideas;
+
+    // Update recent items
+    renderRecentItems();
+
+    // Update type breakdown
+    renderTypeBreakdown();
+}
+
+/**
+ * Get dashboard statistics
+ * @returns {Object} Stats object with counts
+ */
+function getDashboardStats() {
+    const tasks = allEntries.filter(e => e.entity === 'task' && e.kanbanStatus !== 'done');
+    const links = allEntries.filter(e => e.type === 'link');
+    const ideas = allEntries.filter(e => e.type === 'idea');
+
+    return {
+        total: allEntries.length,
+        tasks: tasks.length,
+        links: links.length,
+        ideas: ideas.length
+    };
+}
+
+/**
+ * Render recent items list
+ */
+function renderRecentItems() {
+    const container = document.getElementById('recentItems');
+    const recentEntries = [...allEntries]
+        .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+        .slice(0, 5);
+
+    if (recentEntries.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <p>No entries yet. Start saving links, ideas, and files!</p>
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = recentEntries.map(entry => {
+        const typeColor = TYPE_COLORS[entry.type] || '#64748b';
+        const icon = getTypeIcon(entry.type);
+        const title = entry.title || '(untitled)';
+        const source = entry.source || '';
+        const timestamp = formatRelativeTime(entry.timestamp);
+
+        return `
+            <div class="recent-item" onclick="openDetailPanel(allEntries.find(e => e.timestamp === '${escapeHtml(entry.timestamp)}'))">
+                <div class="recent-item-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${icon}</svg>
+                </div>
+                <div class="recent-item-content">
+                    <div class="recent-item-title">${escapeHtml(title)}</div>
+                    <div class="recent-item-meta">${escapeHtml(source)} • ${timestamp}</div>
+                </div>
+                <div class="recent-item-badge">
+                    <span class="type-badge" style="background:${typeColor};font-size:10px;padding:2px 6px">${escapeHtml(entry.type)}</span>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+/**
+ * Format timestamp to relative time (e.g., "2 hours ago")
+ * @param {string} timestamp - Timestamp string
+ * @returns {string} Relative time string
+ */
+function formatRelativeTime(timestamp) {
+    try {
+        // Parse UltraThink timestamp format: YYYY-MM-DD_HH-MM-SS
+        const match = timestamp.match(/(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})/);
+        if (!match) return timestamp;
+
+        const date = new Date(match[1], match[2] - 1, match[3], match[4], match[5], match[6]);
+        const now = new Date();
+        const diffMs = now - date;
+        const diffMins = Math.floor(diffMs / 60000);
+        const diffHours = Math.floor(diffMins / 60);
+        const diffDays = Math.floor(diffHours / 24);
+
+        if (diffMins < 1) return 'Just now';
+        if (diffMins < 60) return `${diffMins} min ago`;
+        if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
+        if (diffDays < 7) return `${diffDays} day${diffDays > 1 ? 's' : ''} ago`;
+
+        return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+    } catch {
+        return timestamp;
+    }
+}
+
+/**
+ * Render type breakdown cards
+ */
+function renderTypeBreakdown() {
+    const container = document.getElementById('typeBreakdown');
+
+    // Count entries by type
+    const typeCounts = {};
+    allEntries.forEach(entry => {
+        const type = entry.type || 'other';
+        typeCounts[type] = (typeCounts[type] || 0) + 1;
+    });
+
+    // Sort by count descending
+    const sortedTypes = Object.entries(typeCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 8); // Show top 8 types
+
+    if (sortedTypes.length === 0) {
+        container.innerHTML = '';
+        return;
+    }
+
+    container.innerHTML = sortedTypes.map(([type, count]) => {
+        const color = TYPE_COLORS[type] || '#64748b';
+        return `
+            <div class="type-card" onclick="filterByType('${escapeHtml(type)}')" style="border-left: 3px solid ${color}">
+                <div class="type-card-count">${count}</div>
+                <div class="type-card-label">${escapeHtml(type)}</div>
+            </div>
+        `;
+    }).join('');
+}
+
+/**
+ * Filter entries by type and navigate to knowledge page
+ * @param {string} type - The type to filter by
+ */
+function filterByType(type) {
+    navigateToPage('knowledge');
+    document.getElementById('filterType').value = type;
+    applyFilters();
+}
+
+// =========================================
+// COMMAND PALETTE (Cmd+K)
+// =========================================
+
+/** Current selected result index */
+let commandSelectedIndex = 0;
+/** Current command results */
+let commandResults = [];
+
+/**
+ * Command palette commands
+ */
+const PALETTE_COMMANDS = [
+    { id: 'home', label: 'Go to Home', subtitle: 'Dashboard', icon: 'home', action: () => navigateTo('home'), shortcut: ['G', 'H'] },
+    { id: 'knowledge', label: 'Go to Knowledge', subtitle: 'All entries', icon: 'book', action: () => navigateTo('knowledge'), shortcut: ['G', 'K'] },
+    { id: 'tasks', label: 'Go to Tasks', subtitle: 'Task board', icon: 'check', action: () => navigateTo('task'), shortcut: ['G', 'T'] },
+    { id: 'projects', label: 'Go to Projects', subtitle: 'Project list', icon: 'folder', action: () => navigateTo('project'), shortcut: ['G', 'P'] },
+    { id: 'visualise', label: 'Go to Visualise', subtitle: 'Knowledge graph', icon: 'graph', action: () => navigateTo('visualise'), shortcut: ['G', 'V'] },
+    { id: 'search', label: 'Go to Search', subtitle: 'External search', icon: 'search', action: () => navigateTo('search'), shortcut: ['G', 'S'] },
+    { id: 'topics', label: 'Manage Topics', subtitle: 'Add or edit topics', icon: 'tag', action: () => navigateTo('topics') },
+    { id: 'people', label: 'Manage People', subtitle: 'Add or edit people', icon: 'users', action: () => navigateTo('people') },
+    { id: 'settings', label: 'Settings', subtitle: 'App settings', icon: 'settings', action: () => navigateTo('settings') },
+    { id: 'theme', label: 'Toggle Theme', subtitle: 'Switch dark/light mode', icon: 'moon', action: () => { toggleTheme(); closeCommandPalette(); } },
+    { id: 'refresh', label: 'Refresh Data', subtitle: 'Reload all entries', icon: 'refresh', action: () => { loadEntries(); closeCommandPalette(); } },
+];
+
+/**
+ * Get command icon SVG
+ * @param {string} icon - Icon name
+ * @returns {string} SVG markup
+ */
+function getCommandIcon(icon) {
+    const icons = {
+        home: '<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>',
+        book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
+        check: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>',
+        folder: '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',
+        graph: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>',
+        search: '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
+        tag: '<path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/>',
+        users: '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+        settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+        moon: '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>',
+        refresh: '<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>',
+        link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+        file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>'
+    };
+    return icons[icon] || icons.file;
+}
+
+/**
+ * Open command palette
+ */
+function openCommandPalette() {
+    const palette = document.getElementById('commandPalette');
+    const input = document.getElementById('commandInput');
+
+    palette.setAttribute('data-open', 'true');
+    input.value = '';
+    input.focus();
+    commandSelectedIndex = 0;
+    updateCommandResults('');
+}
+
+/**
+ * Close command palette
+ */
+function closeCommandPalette() {
+    const palette = document.getElementById('commandPalette');
+    palette.setAttribute('data-open', 'false');
+}
+
+/**
+ * Toggle command palette
+ */
+function toggleCommandPalette() {
+    const palette = document.getElementById('commandPalette');
+    if (palette.getAttribute('data-open') === 'true') {
+        closeCommandPalette();
+    } else {
+        openCommandPalette();
+    }
+}
+
+/**
+ * Update command results based on query
+ * @param {string} query - Search query
+ */
+function updateCommandResults(query) {
+    const container = document.getElementById('commandResults');
+    const normalizedQuery = query.toLowerCase().trim();
+
+    commandResults = [];
+
+    // If no query, show commands
+    if (!normalizedQuery) {
+        const commandsHtml = PALETTE_COMMANDS.map((cmd, index) => {
+            commandResults.push({ type: 'command', data: cmd });
+            return renderCommandResult(cmd, index, 'command');
+        }).join('');
+
+        container.innerHTML = `
+            <div class="command-result-group">
+                <div class="command-result-group-label">Commands</div>
+                ${commandsHtml}
+            </div>
+        `;
+        updateSelectedResult();
+        return;
+    }
+
+    // Search entries
+    const matchingEntries = allEntries
+        .filter(entry => {
+            const title = (entry.title || '').toLowerCase();
+            const content = (entry.content || '').toLowerCase();
+            return title.includes(normalizedQuery) || content.includes(normalizedQuery);
+        })
+        .slice(0, 8);
+
+    // Search commands
+    const matchingCommands = PALETTE_COMMANDS.filter(cmd =>
+        cmd.label.toLowerCase().includes(normalizedQuery) ||
+        cmd.subtitle.toLowerCase().includes(normalizedQuery)
+    );
+
+    let html = '';
+
+    if (matchingEntries.length > 0) {
+        const entriesHtml = matchingEntries.map((entry, index) => {
+            commandResults.push({ type: 'entry', data: entry });
+            return renderEntryResult(entry, index, normalizedQuery);
+        }).join('');
+
+        html += `
+            <div class="command-result-group">
+                <div class="command-result-group-label">Entries</div>
+                ${entriesHtml}
+            </div>
+        `;
+    }
+
+    if (matchingCommands.length > 0) {
+        const commandsHtml = matchingCommands.map((cmd, index) => {
+            const resultIndex = commandResults.length;
+            commandResults.push({ type: 'command', data: cmd });
+            return renderCommandResult(cmd, resultIndex, 'command');
+        }).join('');
+
+        html += `
+            <div class="command-result-group">
+                <div class="command-result-group-label">Commands</div>
+                ${commandsHtml}
+            </div>
+        `;
+    }
+
+    if (commandResults.length === 0) {
+        html = `
+            <div class="command-palette-empty">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+                <p>No results found for "${escapeHtml(query)}"</p>
+            </div>
+        `;
+    }
+
+    container.innerHTML = html;
+    commandSelectedIndex = 0;
+    updateSelectedResult();
+}
+
+/**
+ * Render a command result item
+ * @param {Object} cmd - Command object
+ * @param {number} index - Result index
+ * @returns {string} HTML string
+ */
+function renderCommandResult(cmd, index) {
+    const icon = getCommandIcon(cmd.icon);
+    const shortcutHtml = cmd.shortcut
+        ? `<div class="command-result-shortcut">${cmd.shortcut.map(k => `<kbd>${k}</kbd>`).join('')}</div>`
+        : '';
+
+    return `
+        <div class="command-result" data-index="${index}" onclick="executeCommandResult(${index})">
+            <div class="command-result-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${icon}</svg>
+            </div>
+            <div class="command-result-content">
+                <div class="command-result-title">${escapeHtml(cmd.label)}</div>
+                <div class="command-result-subtitle">${escapeHtml(cmd.subtitle)}</div>
+            </div>
+            ${shortcutHtml}
+        </div>
+    `;
+}
+
+/**
+ * Render an entry result item
+ * @param {Object} entry - Entry object
+ * @param {number} index - Result index
+ * @param {string} query - Search query for highlighting
+ * @returns {string} HTML string
+ */
+function renderEntryResult(entry, index, query) {
+    const icon = getTypeIcon(entry.type);
+    const title = entry.title || '(untitled)';
+    const highlightedTitle = highlightMatch(title, query);
+    const typeColor = TYPE_COLORS[entry.type] || '#64748b';
+
+    return `
+        <div class="command-result" data-index="${index}" onclick="executeCommandResult(${index})">
+            <div class="command-result-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${icon}</svg>
+            </div>
+            <div class="command-result-content">
+                <div class="command-result-title">${highlightedTitle}</div>
+                <div class="command-result-subtitle">${escapeHtml(entry.source || '')} • ${escapeHtml(entry.type)}</div>
+            </div>
+            <span class="type-badge" style="background:${typeColor};font-size:10px;padding:2px 6px">${escapeHtml(entry.type)}</span>
+        </div>
+    `;
+}
+
+/**
+ * Highlight matching text
+ * @param {string} text - Text to highlight
+ * @param {string} query - Query to match
+ * @returns {string} HTML with highlights
+ */
+function highlightMatch(text, query) {
+    if (!query) return escapeHtml(text);
+    const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+    return escapeHtml(text).replace(regex, '<mark>$1</mark>');
+}
+
+/**
+ * Update selected result styling
+ */
+function updateSelectedResult() {
+    const results = document.querySelectorAll('.command-result');
+    results.forEach((el, index) => {
+        el.classList.toggle('selected', index === commandSelectedIndex);
+    });
+
+    // Scroll into view if needed
+    const selected = results[commandSelectedIndex];
+    if (selected) {
+        selected.scrollIntoView({ block: 'nearest' });
+    }
+}
+
+/**
+ * Execute the selected command result
+ * @param {number} index - Result index
+ */
+function executeCommandResult(index) {
+    const result = commandResults[index];
+    if (!result) return;
+
+    closeCommandPalette();
+
+    if (result.type === 'command') {
+        result.data.action();
+    } else if (result.type === 'entry') {
+        openDetailPanel(result.data);
+    }
+}
+
+/**
+ * Handle keyboard navigation in command palette
+ * @param {KeyboardEvent} e
+ */
+function handleCommandPaletteKeydown(e) {
+    const palette = document.getElementById('commandPalette');
+    if (palette.getAttribute('data-open') !== 'true') return;
+
+    switch (e.key) {
+        case 'ArrowDown':
+            e.preventDefault();
+            commandSelectedIndex = Math.min(commandSelectedIndex + 1, commandResults.length - 1);
+            updateSelectedResult();
+            break;
+        case 'ArrowUp':
+            e.preventDefault();
+            commandSelectedIndex = Math.max(commandSelectedIndex - 1, 0);
+            updateSelectedResult();
+            break;
+        case 'Enter':
+            e.preventDefault();
+            executeCommandResult(commandSelectedIndex);
+            break;
+        case 'Escape':
+            e.preventDefault();
+            closeCommandPalette();
+            break;
+    }
+}
+
+// Initialize command palette event listeners
+document.addEventListener('DOMContentLoaded', function() {
+    const input = document.getElementById('commandInput');
+    if (input) {
+        input.addEventListener('input', (e) => updateCommandResults(e.target.value));
+        input.addEventListener('keydown', handleCommandPaletteKeydown);
+    }
+});
+
+// Global keyboard shortcut for command palette (Cmd+K or Ctrl+K)
+document.addEventListener('keydown', function(e) {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        toggleCommandPalette();
+    }
+});

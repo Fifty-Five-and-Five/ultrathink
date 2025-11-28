@@ -384,7 +384,32 @@ Each entry in `kb.md` looks like this:
 
 ## Version History
 
-- **v2.4.0** (Current)
+- **v3.0.0** (Current) - Major UI Redesign
+  - **Dashboard Home**: New home page with stats cards, quick actions, recent items, and type breakdown
+  - **Slide-out Detail Panel**: Modern slide-out panel replaces modal for viewing entries (like Asana/Linear)
+  - **Command Palette**: Cmd+K (or Ctrl+K) for quick navigation and entry search
+  - **Enhanced Design System**: 100+ CSS custom properties for consistent theming
+  - **Dark Mode**: Full dark mode support with system preference detection and toggle
+  - **Visual Polish**: Smooth animations, focus states, hover effects, custom scrollbars
+  - **Progressive Disclosure**: Empty states, loading skeletons, filter chips
+  - **Accessibility**: WCAG 2.2 compliant focus rings and keyboard navigation
+  - **Modern Shadows**: Layered, realistic depth with color-aware shadows
+
+- **v2.6.0**
+  - Work/Personal classification: New AI Step 4 categorises entries as "work" or "personal"
+  - Category column: New column in KB Viewer grid with blue (work) / green (personal) badges
+  - Category filter: Dropdown filter to show only work or personal entries
+  - Custom prompt support: `work_personal_prompt` in settings.json
+
+- **v2.5.0**
+  - Modern UI redesign: CSS design system with custom properties
+  - Dark mode support: Theme toggle with system preference detection
+  - Enhanced sidebar: Grouped navigation sections (Main, Workspace, Explore, Organize, Settings)
+  - Visual polish: Modern shadows, hover effects, smooth animations
+  - Accessibility: WCAG 2.2 compliant focus states
+  - Modal animations: Entrance animations with backdrop blur
+
+- **v2.4.0**
   - Settings consolidation: API keys and AI prompts moved from extension to `native-host/settings.json`
   - Extension options page simplified to folder path and debug mode only
   - System tray support: Widget runs in background with tray menu

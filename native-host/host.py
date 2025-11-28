@@ -73,6 +73,7 @@ def load_settings():
         dict: Settings dictionary, or empty dict if file not found/invalid.
 
     Settings include:
+        - project_folder: Path to kb.md directory (single source of truth)
         - openai_api_key: OpenAI API key for AI processing
         - github_token, notion_token, fastmail_token: Integration tokens
         - classification_prompt: Custom prompt for entry classification
@@ -86,6 +87,39 @@ def load_settings():
     except Exception:
         pass
     return {}
+
+
+def save_settings(settings):
+    """
+    Save settings to settings.json file.
+
+    Args:
+        settings (dict): Settings dictionary to save.
+
+    Returns:
+        bool: True if saved successfully, False otherwise.
+    """
+    try:
+        with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(settings, f, indent=2)
+        return True
+    except Exception:
+        return False
+
+
+def update_settings(updates):
+    """
+    Update specific settings without overwriting others.
+
+    Args:
+        updates (dict): Dictionary of settings to update.
+
+    Returns:
+        bool: True if saved successfully, False otherwise.
+    """
+    settings = load_settings()
+    settings.update(updates)
+    return save_settings(settings)
 
 
 def get_prompt(settings, key, default):
@@ -523,6 +557,35 @@ DEFAULT_RESEARCH_PROMPT = """Do background research on this topic and provide a 
 
 {notes}"""
 
+DEFAULT_WORK_PERSONAL_PROMPT = """Based on all available information about this entry, classify it as either "work" or "personal".
+
+WORK indicators:
+- Fifty Five and Five (the company name or its clients/projects)
+- Client names, project names, business terminology
+- Professional tools (Jira, Azure DevOps, Notion workspaces, GitHub)
+- Technical/development content, code, software engineering
+- Meeting notes, proposals, documentation, invoices
+- Professional contacts, colleagues, clients
+
+PERSONAL indicators:
+- Family members: Katie, Georgia, Thomas
+- Personal admin (bills, appointments, home maintenance)
+- Hobbies, entertainment, personal interests, travel
+- Personal finance, health, fitness
+- Friends, personal social activities
+
+Entry information:
+- Title: {title}
+- URL: {url}
+- Notes: {notes}
+- Selected text: {selectedText}
+- AI Summary: {aiSummary}
+- Entity type: {entity}
+- Topics: {topics}
+- People: {people}
+
+Respond with exactly one word: work or personal"""
+
 
 def classify_entry(entry, api_key, existing_topics, existing_entities, ai_summary=None, custom_prompt=None):
     """
@@ -602,12 +665,28 @@ def classify_entry(entry, api_key, existing_topics, existing_entities, ai_summar
 
         # Parse JSON from response (handle markdown code blocks)
         json_text = text_content.strip()
-        if json_text.startswith('```'):
-            # Remove markdown code block
-            lines = json_text.split('\n')
-            json_text = '\n'.join(lines[1:-1] if lines[-1] == '```' else lines[1:])
 
-        classification = json.loads(json_text)
+        # Log raw response for debugging
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: Classification raw response: {json_text[:200]}...\n")
+
+        # Handle markdown code blocks (```json ... ``` or ``` ... ```)
+        if json_text.startswith('```'):
+            lines = json_text.split('\n')
+            # Remove first line (```json or ```)
+            lines = lines[1:]
+            # Remove last line if it's closing ```
+            if lines and lines[-1].strip() == '```':
+                lines = lines[:-1]
+            json_text = '\n'.join(lines)
+
+        # Try to parse JSON
+        try:
+            classification = json.loads(json_text)
+        except json.JSONDecodeError as je:
+            with open(log_file, 'a', encoding='utf-8') as f:
+                f.write(f"{datetime.now()}: Classification JSON parse error: {je}. Text was: {json_text[:100]}\n")
+            return None
 
         with open(log_file, 'a', encoding='utf-8') as f:
             f.write(f"{datetime.now()}: AI classification result: {classification}\n")
@@ -621,6 +700,107 @@ def classify_entry(entry, api_key, existing_topics, existing_entities, ai_summar
     except Exception as e:
         with open(log_file, 'a', encoding='utf-8') as f:
             f.write(f"{datetime.now()}: AI classification error: {str(e)}\n")
+        return None
+
+
+def classify_work_personal(entry, api_key, classification=None, ai_summary=None, custom_prompt=None):
+    """
+    Step 4: Classify entry as 'work' or 'personal' using OpenAI API.
+    Uses all available context including previous classification results.
+    Returns 'work' or 'personal', or None if classification fails.
+    """
+    log_file = Path(__file__).parent / 'host.log'
+
+    if not api_key:
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: Work/personal classification skipped - no API key\n")
+        return None
+
+    try:
+        # Build context from entry and classification
+        title = entry.get('title', '')
+        url = entry.get('url', '')
+        notes = entry.get('notes', '')
+        selected_text = entry.get('selectedText', '')
+
+        # Get classification results if available
+        entity = classification.get('entity', '') if classification else ''
+        topics = ', '.join(classification.get('topics', [])) if classification else ''
+        people = ', '.join(classification.get('people', [])) if classification else ''
+
+        # Use custom prompt or default
+        prompt_template = custom_prompt if custom_prompt else DEFAULT_WORK_PERSONAL_PROMPT
+
+        # Replace placeholders in prompt
+        prompt = prompt_template.format(
+            title=title,
+            url=url,
+            notes=notes,
+            selectedText=selected_text,
+            aiSummary=ai_summary or '',
+            entity=entity,
+            topics=topics,
+            people=people
+        )
+
+        # Call OpenAI Responses API
+        request_data = json.dumps({
+            'model': 'gpt-5-nano',
+            'input': prompt
+        }).encode('utf-8')
+
+        req = urllib.request.Request(
+            'https://api.openai.com/v1/responses',
+            data=request_data,
+            headers={
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {api_key}'
+            }
+        )
+
+        with urllib.request.urlopen(req, timeout=30) as response:
+            result = json.loads(response.read().decode('utf-8'))
+
+        # Extract text from response
+        output_message = None
+        for item in result.get('output', []):
+            if item.get('type') == 'message':
+                output_message = item
+                break
+
+        if not output_message:
+            return None
+
+        text_content = None
+        for content_item in output_message.get('content', []):
+            if content_item.get('type') == 'output_text':
+                text_content = content_item.get('text', '')
+                break
+
+        if not text_content:
+            return None
+
+        # Parse response - should be just "work" or "personal"
+        category = text_content.strip().lower()
+
+        # Validate response
+        if category not in ('work', 'personal'):
+            with open(log_file, 'a', encoding='utf-8') as f:
+                f.write(f"{datetime.now()}: Work/personal classification invalid response: {category}\n")
+            return None
+
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: Work/personal classification result: {category}\n")
+
+        return category
+
+    except urllib.error.HTTPError as e:
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: Work/personal classification HTTP error: {e.code} {e.reason}\n")
+        return None
+    except Exception as e:
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: Work/personal classification error: {str(e)}\n")
         return None
 
 
@@ -811,7 +991,7 @@ def summarize_with_research(notes, api_key, custom_prompt=None):
             }
         )
 
-        with urllib.request.urlopen(req, timeout=90) as response:  # Longer timeout for web search
+        with urllib.request.urlopen(req, timeout=120) as response:  # Longer timeout for web search
             result = json.loads(response.read().decode('utf-8'))
 
         # Extract text from response
@@ -1075,7 +1255,7 @@ def summarize_link(entry, api_key, custom_prompt=None, text_prompt=None):
             }
         )
 
-        with urllib.request.urlopen(req, timeout=90) as response:  # Longer timeout for reasoning
+        with urllib.request.urlopen(req, timeout=120) as response:  # Longer timeout for reasoning
             result = json.loads(response.read().decode('utf-8'))
 
         # Extract summary text and sources
@@ -1765,6 +1945,7 @@ def background_process_entry(project_folder, timestamp, entry, api_key, file_pat
     1. Grammar correction on user notes
     2. AI summary generation (type-specific)
     3. Classification (entity, topics, people extraction)
+    4. Work/personal categorisation
 
     Each step's results are written back to kb.md incrementally.
     Prompts are loaded from settings.json file.
@@ -1786,6 +1967,7 @@ def background_process_entry(project_folder, timestamp, entry, api_key, file_pat
         settings = load_settings()
         classification_prompt = get_prompt(settings, 'classification_prompt', DEFAULT_CLASSIFICATION_PROMPT)
         grammar_prompt = get_prompt(settings, 'grammar_prompt', DEFAULT_GRAMMAR_PROMPT)
+        work_personal_prompt = get_prompt(settings, 'work_personal_prompt', DEFAULT_WORK_PERSONAL_PROMPT)
 
         # Load all summary prompts
         summary_prompts = {
@@ -1833,6 +2015,12 @@ def background_process_entry(project_folder, timestamp, entry, api_key, file_pat
 
                 # Add classification metadata to kb.md entry
                 add_classification_to_entry(project_folder, timestamp, classification)
+
+        # STEP 4: Work/Personal classification (uses all context from previous steps)
+        if api_key:
+            category = classify_work_personal(entry, api_key, classification, summary, work_personal_prompt)
+            if category:
+                add_category_to_entry(project_folder, timestamp, category)
 
         with open(log_file, 'a', encoding='utf-8') as f:
             f.write(f"{datetime.now()}: Background thread completed for {timestamp}\n")
@@ -1917,6 +2105,68 @@ def add_classification_to_entry(project_folder, timestamp, classification):
     except Exception as e:
         with open(log_file, 'a', encoding='utf-8') as f:
             f.write(f"{datetime.now()}: add_classification_to_entry error: {str(e)}\n")
+        return False
+
+
+def add_category_to_entry(project_folder, timestamp, category):
+    """Add Category (work/personal) metadata line to an existing kb.md entry."""
+    log_file = Path(__file__).parent / 'host.log'
+
+    try:
+        is_valid, result = validate_project_folder(project_folder)
+        if not is_valid:
+            return False
+
+        folder_path = result
+        kb_file = folder_path / 'kb.md'
+
+        if not kb_file.exists():
+            return False
+
+        with open(kb_file, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+
+        # Find entry with matching timestamp
+        i = 0
+        while i < len(lines):
+            if f'`{timestamp}`' in lines[i]:
+                # Found entry - find where to insert category
+                j = i + 1
+                insert_pos = j
+
+                while j < len(lines):
+                    if lines[j].startswith('- '):
+                        # Hit next entry
+                        insert_pos = j
+                        break
+                    elif lines[j].strip() == '':
+                        # Hit blank line (end of entry)
+                        insert_pos = j
+                        break
+                    j += 1
+                else:
+                    insert_pos = len(lines)
+
+                # Insert category line
+                category_line = f"  - Category: {category}\n"
+                lines.insert(insert_pos, category_line)
+
+                # Write back
+                with open(kb_file, 'w', encoding='utf-8') as f:
+                    f.writelines(lines)
+
+                with open(log_file, 'a', encoding='utf-8') as f:
+                    f.write(f"{datetime.now()}: Category added for {timestamp}: {category}\n")
+
+                return True
+
+            i += 1
+
+        return False
+
+    except Exception as e:
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: add_category_to_entry error: {str(e)}\n")
         return False
 
 
@@ -2123,6 +2373,12 @@ def main():
                 api_key = message.get('apiKey')  # API key for AI classification
                 # Note: prompts are now read from settings.json by background_process_entry
 
+                # Persist projectFolder to settings.json so widget/kb-server stay in sync
+                if project_folder:
+                    current_settings = load_settings()
+                    if current_settings.get('project_folder') != project_folder:
+                        update_settings({'project_folder': project_folder})
+
                 result = append_to_kb(project_folder, entry, api_key)
 
                 # Extract background task before sending (don't send internal field to extension)
@@ -2181,6 +2437,28 @@ def main():
 
                 result = search_github(query, github_token, repos, max_results)
                 send_message(result)
+            elif message.get('action') == 'get_settings':
+                # Return settings (for extension options page)
+                settings = load_settings()
+                send_message({
+                    'success': True,
+                    'project_folder': settings.get('project_folder', ''),
+                    'openai_api_key': settings.get('openai_api_key', ''),
+                    'github_token': settings.get('github_token', ''),
+                    'github_org': settings.get('github_org', ''),
+                    'github_repos': settings.get('github_repos', ''),
+                    'notion_token': settings.get('notion_token', ''),
+                    'fastmail_token': settings.get('fastmail_token', ''),
+                    'capsule_token': settings.get('capsule_token', ''),
+                    'extension_id': settings.get('extension_id', '')
+                })
+            elif message.get('action') == 'save_settings':
+                # Save settings from extension (settings.json is source of truth)
+                updates = message.get('settings', {})
+                if update_settings(updates):
+                    send_message({'success': True})
+                else:
+                    send_message({'success': False, 'error': 'Failed to save settings'})
             else:
                 send_message({'success': False, 'error': 'Unknown action'})
 
