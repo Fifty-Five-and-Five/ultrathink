@@ -14,6 +14,81 @@ const screenshotLog = createLogger('Screenshot');
 const saveLog = createLogger('Save');
 const initLog = createLogger('Init');
 const metadataLog = createLogger('Metadata');
+const aiLog = createLogger('AI');
+
+// AI processing type definitions for logging
+const AI_PROCESSING_INFO = {
+  // Types that get image/vision analysis
+  'screenshot': { summary: 'GPT-5 Vision', classification: true, relationships: true },
+  'image': { summary: 'GPT-5 Vision', classification: true, relationships: true },
+  // Types that get research (web search)
+  'long-note': { summary: 'GPT-5 Research (web search)', classification: true, relationships: true },
+  // Types that get audio transcription
+  'audio': { summary: 'Whisper transcription + analysis', classification: true, relationships: true },
+  // Document types
+  'pdf': { summary: 'Document extraction + GPT-5-nano', classification: true, relationships: true },
+  'markdown': { summary: 'Document extraction + GPT-5-nano', classification: true, relationships: true },
+  'ms-word': { summary: 'Document extraction + GPT-5-nano', classification: true, relationships: true },
+  'ms-excel': { summary: 'Document extraction + GPT-5-nano', classification: true, relationships: true },
+  'ms-powerpoint': { summary: 'Document extraction + GPT-5-nano', classification: true, relationships: true },
+  'ms-onenote': { summary: 'Document extraction + GPT-5-nano', classification: true, relationships: true },
+  // Link types (web browsing)
+  'link': { summary: 'GPT-5 Web browse + search', classification: true, relationships: true },
+  'chatgpt': { summary: 'GPT-5 Web browse + search', classification: true, relationships: true },
+  'claude': { summary: 'GPT-5 Web browse + search', classification: true, relationships: true },
+  'perplexity': { summary: 'GPT-5 Web browse + search', classification: true, relationships: true },
+  'notion': { summary: 'GPT-5 Web browse + search', classification: true, relationships: true },
+  // Text types
+  'snippet': { summary: 'GPT-5 text summary', classification: true, relationships: true },
+  'note': { summary: 'GPT-5 text summary', classification: true, relationships: true },
+  'para': { summary: 'GPT-5 text summary', classification: true, relationships: true },
+  'idea': { summary: 'GPT-5 text summary', classification: true, relationships: true },
+  // No summary types
+  'video': { summary: null, classification: true, relationships: true },
+  'file': { summary: 'GPT-5 text summary (fallback)', classification: true, relationships: true }
+};
+
+/**
+ * Logs expected AI processing for an entry type.
+ * @param {string} type - Entry type (e.g., 'screenshot', 'link', 'snippet')
+ * @param {string} timestamp - Entry timestamp for correlation
+ * @param {boolean} hasApiKey - Whether API key is configured
+ * @param {boolean} hasNotes - Whether entry has user notes
+ */
+function logExpectedAIProcessing(type, timestamp, hasApiKey, hasNotes) {
+  if (!hasApiKey) {
+    aiLog.info(`[${timestamp}] No API key - skipping all AI processing`);
+    return;
+  }
+
+  const info = AI_PROCESSING_INFO[type] || AI_PROCESSING_INFO['file'];
+  const steps = [];
+
+  // Step 1: Summary
+  if (info.summary) {
+    steps.push(`Summary: ${info.summary}`);
+  } else {
+    steps.push('Summary: Skipped (video type)');
+  }
+
+  // Step 2: Classification (always runs with API key)
+  steps.push('Classification: GPT-5-nano (entity, topics, people, work/personal, grammar)');
+
+  // Step 3: Relationships (only if notes exist)
+  if (hasNotes) {
+    steps.push('Relationships: GPT-5-nano (extract references, resolve matches)');
+    steps.push('Similarity: GPT-5-nano (find related entries)');
+  } else {
+    steps.push('Relationships: Skipped (no notes)');
+    steps.push('Similarity: May run if summary provides content');
+  }
+
+  aiLog.info(`[${timestamp}] AI pipeline starting for type="${type}":`);
+  steps.forEach((step, i) => {
+    aiLog.info(`  ${i + 1}. ${step}`);
+  });
+  aiLog.info(`[${timestamp}] Check host.log for detailed progress`);
+}
 
 /**
  * Temporary storage for screenshot data between capture and popup.
@@ -231,6 +306,15 @@ async function handleSaveSingle(request) {
       notes: request.notes || ''                 // New: user commentary
     };
 
+    // Log entry details
+    saveLog.info(`[${timestamp}] Saving entry:`, {
+      type: request.type,
+      title: tab.title.substring(0, 50) + (tab.title.length > 50 ? '...' : ''),
+      hasSelectedText: !!request.selectedText,
+      hasNotes: !!request.notes,
+      tabGroup: tabGroup?.groupName || null
+    });
+
     // Extract page metadata for link-type entries (not screenshots, not special pages)
     const linkTypes = ['link', 'claude', 'chatgpt', 'perplexity', 'pdf', 'markdown', 'notion', 'video', 'ms-word', 'ms-excel', 'ms-powerpoint', 'ms-onenote'];
     if (linkTypes.includes(request.type) && tab.url && tab.url.startsWith('http')) {
@@ -238,6 +322,12 @@ async function handleSaveSingle(request) {
         const metadata = await getPageMetadata(tab.id);
         if (metadata) {
           data.pageMetadata = metadata;
+          metadataLog.info(`[${timestamp}] Page metadata extracted:`, {
+            hasDescription: !!metadata.description,
+            hasOgImage: !!metadata.ogImage,
+            author: metadata.author || null,
+            readingTime: metadata.readingTime || null
+          });
         }
       } catch (e) {
         metadataLog.debug('Could not extract metadata:', e.message);
@@ -247,10 +337,12 @@ async function handleSaveSingle(request) {
     // Add screenshot data if present
     if (request.screenshotData && request.type === 'screenshot') {
       data.screenshot = request.screenshotData.dataUrl;
+      saveLog.info(`[${timestamp}] Screenshot attached (${Math.round(request.screenshotData.dataUrl.length / 1024)}KB)`);
     }
 
     // Send to native host with API key for background processing (grammar + classification)
     // Python host spawns a thread to handle this, so response returns immediately
+    const hasApiKey = !!settings.openaiKey;
     const message = {
       action: 'append',
       projectFolder: projectFolder,
@@ -259,17 +351,21 @@ async function handleSaveSingle(request) {
       // Note: prompts are now read from settings.json by the native host
     };
 
+    saveLog.info(`[${timestamp}] Sending to native host...`);
     const response = await sendNativeMessage(message);
 
     if (response && response.success) {
-      // Background processing (grammar + classification) happens in Python thread
-      // No JS background work needed - UI can return immediately
+      saveLog.info(`[${timestamp}] Entry saved to kb.md`);
+
+      // Log expected AI processing pipeline
+      logExpectedAIProcessing(request.type, timestamp, hasApiKey, !!request.notes);
+
       return { success: true };
     } else {
       throw new Error(response?.error || 'Native host returned error');
     }
   } catch (error) {
-    saveLog.error('Background save error:', error);
+    saveLog.error('Save error:', error);
     throw error;
   }
 }
@@ -288,19 +384,23 @@ async function handleSaveAllTabs(request) {
     const settings = await getSettings();
     const projectFolder = settings.projectFolder || DEFAULT_SETTINGS.projectFolder;
     const apiKey = settings.openaiKey || '';
+    const hasApiKey = !!apiKey;
 
     const timestamp = formatTimestamp();
     let savedCount = 0;
 
+    saveLog.info(`[${timestamp}] Bulk save starting: ${request.tabs.length} tabs`);
+
     // Process each tab
     for (const tab of request.tabs) {
       const tabGroup = await getTabGroupInfo(tab);
+      const tabTimestamp = formatTimestamp(); // Unique timestamp per tab
 
       // Build entry with new consistent format
       const data = {
         type: request.type,
         source: 'browser',           // New: 'browser' or 'widget'
-        captured: timestamp,
+        captured: tabTimestamp,
         title: tab.title,
         url: tab.url,                // New: URL is now separate field
         tabGroup: tabGroup,
@@ -321,15 +421,21 @@ async function handleSaveAllTabs(request) {
 
       if (response && response.success) {
         savedCount++;
+        saveLog.info(`[${tabTimestamp}] Saved tab ${savedCount}/${request.tabs.length}: ${tab.title.substring(0, 40)}...`);
         // Background processing happens in Python thread
       } else {
-        saveLog.error('Failed to save tab:', tab.title);
+        saveLog.error(`[${tabTimestamp}] Failed to save tab:`, tab.title);
       }
+    }
+
+    saveLog.info(`[${timestamp}] Bulk save complete: ${savedCount}/${request.tabs.length} tabs saved`);
+    if (hasApiKey) {
+      aiLog.info(`[${timestamp}] AI processing will run for each tab in background (check host.log)`);
     }
 
     return { success: true, count: savedCount };
   } catch (error) {
-    saveLog.error('Background bulk save error:', error);
+    saveLog.error('Bulk save error:', error);
     throw error;
   }
 }
@@ -348,6 +454,7 @@ async function handleFileSave(request, tab) {
   try {
     const settings = await getSettings();
     const projectFolder = settings.projectFolder || DEFAULT_SETTINGS.projectFolder;
+    const hasApiKey = !!settings.openaiKey;
 
     const timestamp = formatTimestamp();
     const originalNotes = request.notes || '';
@@ -368,12 +475,26 @@ async function handleFileSave(request, tab) {
     if (request.fileType === 'file') {
       data.fileData = request.fileData;
       data.mimeType = request.mimeType;
+      const fileSizeKB = Math.round(request.fileData.length / 1024);
+      saveLog.info(`[${timestamp}] Saving file:`, {
+        type: data.type,
+        fileName: request.fileName,
+        mimeType: request.mimeType,
+        sizeKB: fileSizeKB,
+        hasNotes: !!originalNotes
+      });
     } else if (request.fileType === 'text') {
       // For pasted text, save as snippet with page context
       data.type = 'snippet';
       data.url = tab.url;              // Use current page URL for text
       data.title = tab.title;
       data.selectedText = request.content;  // Pasted text goes to selectedText
+      saveLog.info(`[${timestamp}] Saving pasted text:`, {
+        type: 'snippet',
+        contentLength: request.content.length,
+        pageTitle: tab.title.substring(0, 40) + '...',
+        hasNotes: !!originalNotes
+      });
     }
 
     // Send to native host with API key for background processing
@@ -384,10 +505,15 @@ async function handleFileSave(request, tab) {
       apiKey: settings.openaiKey || ''
     };
 
+    saveLog.info(`[${timestamp}] Sending to native host...`);
     const response = await sendNativeMessage(message);
 
     if (response && response.success) {
-      // Background processing happens in Python thread
+      saveLog.info(`[${timestamp}] File/text saved to kb.md`);
+
+      // Log expected AI processing pipeline
+      logExpectedAIProcessing(data.type, timestamp, hasApiKey, !!originalNotes);
+
       return { success: true };
     } else {
       throw new Error(response?.error || 'Native host returned error');

@@ -51,6 +51,9 @@ import shutil
 import webbrowser
 import http.server
 import socketserver
+import atexit
+import tempfile
+import subprocess
 
 # Import save functions from host.py
 sys.path.insert(0, str(Path(__file__).parent))
@@ -80,6 +83,108 @@ def save_settings(settings):
         return True
     except Exception:
         return False
+
+
+# Single-instance protection
+LOCK_FILE = Path(tempfile.gettempdir()) / 'ultrathink_widget.lock'
+STATE_FILE = Path(__file__).parent / 'widget_state.json'
+WIDGET_LOG = Path(__file__).parent / 'widget.log'
+
+
+def widget_log(msg):
+    """Log to widget.log for debugging."""
+    try:
+        with open(WIDGET_LOG, 'a', encoding='utf-8') as f:
+            from datetime import datetime
+            f.write(f"{datetime.now()}: {msg}\n")
+    except:
+        pass
+
+
+def is_widget_running():
+    """Check if widget is running by looking for its window owned by Python."""
+    widget_log("is_widget_running() called")
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        # Find window with title "UltraThink Widget"
+        hwnd = ctypes.windll.user32.FindWindowW(None, "UltraThink Widget")
+        widget_log(f"  FindWindowW returned hwnd={hwnd}")
+
+        if hwnd:
+            # Verify the window belongs to a Python process
+            pid = wintypes.DWORD()
+            ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+            widget_log(f"  Window PID: {pid.value}")
+
+            # Check if this PID is pythonw.exe or python.exe
+            result = subprocess.run(
+                ['tasklist', '/FI', f'PID eq {pid.value}', '/NH', '/FO', 'CSV'],
+                capture_output=True, text=True
+            )
+            widget_log(f"  tasklist result: {result.stdout.strip()}")
+
+            if 'pythonw.exe' in result.stdout.lower() or 'python.exe' in result.stdout.lower():
+                widget_log("  Window belongs to Python - widget IS running")
+                return True
+            else:
+                widget_log("  Window does NOT belong to Python - ignoring")
+    except Exception as e:
+        widget_log(f"  is_widget_running error: {e}")
+
+    # No window found - clean up any stale lock file
+    widget_log("  No window found - cleaning up stale lock file")
+    try:
+        LOCK_FILE.unlink(missing_ok=True)
+        widget_log("  Lock file cleaned up")
+    except Exception as e:
+        widget_log(f"  Lock file cleanup error: {e}")
+    return False
+
+
+def acquire_lock():
+    """Acquire single-instance lock. Returns True if successful."""
+    if is_widget_running():
+        return False
+    try:
+        with open(LOCK_FILE, 'w') as f:
+            f.write(str(os.getpid()))
+        return True
+    except OSError:
+        return False
+
+
+def release_lock():
+    """Release the lock file on exit."""
+    try:
+        LOCK_FILE.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def update_widget_state(running):
+    """Update widget state file for host.py coordination."""
+    state = {'running': running, 'pid': os.getpid() if running else None}
+    try:
+        with open(STATE_FILE, 'w') as f:
+            json.dump(state, f)
+    except OSError:
+        pass
+
+
+def focus_existing_window():
+    """Try to focus the existing widget window."""
+    try:
+        import ctypes
+        hwnd = ctypes.windll.user32.FindWindowW(None, "UltraThink Widget")
+        if hwnd:
+            ctypes.windll.user32.SetForegroundWindow(hwnd)
+            ctypes.windll.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def generate_native_manifest(ext_id):
@@ -276,6 +381,12 @@ ICON_SPINNER = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fi
 ICON_PLUS = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="{color}"><path d="M224,128a8,8,0,0,1-8,8H136v80a8,8,0,0,1-16,0V136H40a8,8,0,0,1,0-16h80V40a8,8,0,0,1,16,0v80h80A8,8,0,0,1,224,128Z"/></svg>'
 ICON_MINUS = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="{color}"><path d="M224,128a8,8,0,0,1-8,8H40a8,8,0,0,1,0-16H216A8,8,0,0,1,224,128Z"/></svg>'
 ICON_MONITOR = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="{color}"><path d="M208,40H48A24,24,0,0,0,24,64V176a24,24,0,0,0,24,24H96v16H72a8,8,0,0,0,0,16h112a8,8,0,0,0,0-16H160V200h48a24,24,0,0,0,24-24V64A24,24,0,0,0,208,40ZM48,56H208a8,8,0,0,1,8,8V160H40V64A8,8,0,0,1,48,56ZM208,184H48a8,8,0,0,1-8-8v-0H216v0A8,8,0,0,1,208,184Zm-64,16v16H112V200Z"/></svg>'
+# Desktop icon (cleaner monitor style for multi-monitor toggle)
+ICON_DESKTOP = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="{color}"><path d="M208,40H48A24,24,0,0,0,24,64V176a24,24,0,0,0,24,24h72v16H96a8,8,0,0,0,0,16h64a8,8,0,0,0,0-16H136V200h72a24,24,0,0,0,24-24V64A24,24,0,0,0,208,40Zm8,136a8,8,0,0,1-8,8H48a8,8,0,0,1-8-8V64a8,8,0,0,1,8-8H208a8,8,0,0,1,8,8Z"/></svg>'
+# Arrows-in icon for minimal/shrink mode
+ICON_ARROWS_IN = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="{color}"><path d="M144,104V64a8,8,0,0,1,16,0V88h24a8,8,0,0,1,0,16H152A8,8,0,0,1,144,104ZM104,144H72a8,8,0,0,0,0,16H96v24a8,8,0,0,0,16,0V152A8,8,0,0,0,104,144Zm80,0H152a8,8,0,0,0-8,8v32a8,8,0,0,0,16,0V168h24a8,8,0,0,0,0-16ZM104,64a8,8,0,0,0-8,8V96H72a8,8,0,0,0,0,16h32a8,8,0,0,0,8-8V72A8,8,0,0,0,104,64Z"/></svg>'
+# X icon for close button
+ICON_X = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="{color}"><path d="M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z"/></svg>'
 
 
 def create_icon_from_svg(svg_data, size=16, color="#666"):
@@ -467,21 +578,45 @@ class SelectionOverlay(QWidget):
             if rect.width() < 10 or rect.height() < 10:
                 self._finish(None)
             else:
-                # Convert widget-local coords to screen coords for mss
-                # mapToGlobal returns logical coords, but mss needs physical pixels
+                # Convert widget-local coords to global logical coords
                 top_left = self.mapToGlobal(rect.topLeft())
+                bottom_right = self.mapToGlobal(rect.bottomRight())
 
-                # Get DPR for the screen where selection was made
+                # Get the screen where selection was made
                 screen = QGuiApplication.screenAt(top_left)
-                if screen:
-                    dpr = screen.devicePixelRatio()
-                else:
-                    dpr = QGuiApplication.primaryScreen().devicePixelRatio()
+                if not screen:
+                    screen = QGuiApplication.primaryScreen()
 
-                # Scale to physical pixels for mss
+                dpr = screen.devicePixelRatio()
+                screen_geo = screen.geometry()  # Logical coordinates
+
+                # Calculate position relative to this screen's logical origin
+                rel_x = top_left.x() - screen_geo.x()
+                rel_y = top_left.y() - screen_geo.y()
+
+                # Find matching mss monitor by comparing logical geometry
+                # mss monitors are in physical pixels
+                phys_screen_x = int(screen_geo.x() * dpr)
+                phys_screen_y = int(screen_geo.y() * dpr)
+
+                try:
+                    with mss.mss() as sct:
+                        # Find monitor that matches this screen's position
+                        for mon in sct.monitors[1:]:  # Skip combined monitor at index 0
+                            # Check if this monitor's physical position matches
+                            # scaled logical position (with some tolerance)
+                            if (abs(mon['left'] - phys_screen_x) < 50 and
+                                abs(mon['top'] - phys_screen_y) < 50):
+                                phys_screen_x = mon['left']
+                                phys_screen_y = mon['top']
+                                break
+                except:
+                    pass  # Use fallback calculation
+
+                # Physical position = screen physical origin + (relative offset * DPR)
                 screen_rect = QRect(
-                    int(top_left.x() * dpr),
-                    int(top_left.y() * dpr),
+                    phys_screen_x + int(rel_x * dpr),
+                    phys_screen_y + int(rel_y * dpr),
                     int(rect.width() * dpr),
                     int(rect.height() * dpr)
                 )
@@ -529,6 +664,10 @@ class UltraThinkWidget(QWidget):
         # Track current long note timestamp (for updating same entry)
         self.current_note_timestamp = None
 
+        # Track active long note session for sub-notes (audio/screenshots captured during session)
+        # Set when first save happens in expanded mode, cleared on collapse
+        self.long_note_session_id = None
+
         # Multi-tab support for expanded mode
         # Each tab: {'text': str, 'timestamp': str or None}
         self.note_tabs = [{'html': '', 'timestamp': None}]
@@ -537,6 +676,9 @@ class UltraThinkWidget(QWidget):
         # Multi-monitor mode
         self.multi_monitor_enabled = False
         self.mirror_widgets = []  # List of mirror widgets on other screens
+
+        # Minimal mode (compact, transparent view)
+        self.minimal_mode = False
 
         self.init_ui()
 
@@ -551,7 +693,7 @@ class UltraThinkWidget(QWidget):
         self.setMouseTracking(True)
 
         # Set window title for taskbar
-        self.setWindowTitle("UltraThink")
+        self.setWindowTitle("UltraThink Widget")
 
         self.setMinimumSize(200, 200)
         self.resize(280, 320)
@@ -577,39 +719,58 @@ class UltraThinkWidget(QWidget):
 
         # Header
         header = QHBoxLayout()
-        title = QLabel("Ultrathink")
-        title.setStyleSheet("font-size: 14px; font-weight: 600; color: #333;")
-        header.addWidget(title)
+        self.title_label = QLabel("Ultrathink")
+        self.title_label.setStyleSheet("font-size: 14px; font-weight: 600; color: #333;")
+        header.addWidget(self.title_label)
         header.addStretch()
 
         # Multi-monitor toggle button
         self.monitor_btn = QPushButton()
         self.monitor_btn.setFixedSize(24, 24)
         self.monitor_btn.setCursor(Qt.CursorShape.ArrowCursor)
-        self.monitor_btn.setIcon(create_icon_from_svg(ICON_MONITOR, 16, "#666"))
+        self.monitor_btn.setIcon(create_icon_from_svg(ICON_DESKTOP, 16, "#666"))
         self.monitor_btn.setIconSize(QSize(16, 16))
         self.monitor_btn.setToolTip("Show on all monitors")
         self._update_monitor_btn_style()
         self.monitor_btn.clicked.connect(self.toggle_multi_monitor)
         header.addWidget(self.monitor_btn)
 
-        close_btn = QPushButton("×")
-        close_btn.setFixedSize(24, 24)
-        close_btn.setCursor(Qt.CursorShape.ArrowCursor)
-        close_btn.setStyleSheet("""
+        # Shrink/minimal mode button
+        self.shrink_btn = QPushButton()
+        self.shrink_btn.setFixedSize(24, 24)
+        self.shrink_btn.setCursor(Qt.CursorShape.ArrowCursor)
+        self.shrink_btn.setIcon(create_icon_from_svg(ICON_ARROWS_IN, 16, "#666"))
+        self.shrink_btn.setIconSize(QSize(16, 16))
+        self.shrink_btn.setToolTip("Minimal mode")
+        self.shrink_btn.setStyleSheet("""
             QPushButton {
                 border: none;
-                font-size: 18px;
-                color: #666;
                 border-radius: 4px;
             }
             QPushButton:hover {
                 background: #f5f5f5;
-                color: #333;
             }
         """)
-        close_btn.clicked.connect(self.close)
-        header.addWidget(close_btn)
+        self.shrink_btn.clicked.connect(self.enter_minimal_mode)
+        header.addWidget(self.shrink_btn)
+
+        self.close_btn = QPushButton()
+        self.close_btn.setFixedSize(24, 24)
+        self.close_btn.setCursor(Qt.CursorShape.ArrowCursor)
+        self.close_btn.setIcon(create_icon_from_svg(ICON_X, 16, "#666"))
+        self.close_btn.setIconSize(QSize(16, 16))
+        self.close_btn.setToolTip("Close")
+        self.close_btn.setStyleSheet("""
+            QPushButton {
+                border: none;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background: #f5f5f5;
+            }
+        """)
+        self.close_btn.clicked.connect(self.close)
+        header.addWidget(self.close_btn)
         layout.addLayout(header)
 
         # Drop zone - top half
@@ -722,6 +883,22 @@ class UltraThinkWidget(QWidget):
         self.save_btn = create_toolbar_btn(ICON_SAVE, "Save (Ctrl+S)")
         self.save_btn.clicked.connect(self.manual_save)
         toolbar_layout.addWidget(self.save_btn)
+
+        # Sub-note indicator (shows when session active - audio/screenshots link to main note)
+        self.subnote_indicator = QLabel("Sub-notes")
+        self.subnote_indicator.setStyleSheet("""
+            QLabel {
+                background: #ff5200;
+                color: white;
+                font-size: 10px;
+                padding: 2px 6px;
+                border-radius: 8px;
+                font-weight: bold;
+            }
+        """)
+        self.subnote_indicator.setToolTip("Audio and screenshots will be linked to this note")
+        self.subnote_indicator.hide()  # Hidden until session active
+        toolbar_layout.addWidget(self.subnote_indicator)
 
         self.toolbar_widget.hide()  # Hidden by default
         layout.addWidget(self.toolbar_widget)
@@ -974,6 +1151,12 @@ class UltraThinkWidget(QWidget):
     def mouseReleaseEvent(self, event):
         self._drag_pos = None
         self._resize_edge = None
+
+    def mouseDoubleClickEvent(self, event):
+        """Handle double-click to exit minimal mode."""
+        if self.minimal_mode:
+            self.exit_minimal_mode()
+        super().mouseDoubleClickEvent(event)
 
     def install_event_filter_recursive(self, widget):
         """Install event filter on widget and all children for cursor updates."""
@@ -1261,6 +1444,10 @@ class UltraThinkWidget(QWidget):
                         'notes': user_notes,
                         'fileData': f"data:application/octet-stream;base64,{item['data']}"
                     }
+
+                # Add parentId if in active long note session (makes this a sub-note)
+                if self.expanded_mode and self.long_note_session_id:
+                    entry['parentId'] = self.long_note_session_id
 
                 result = append_to_kb(PROJECT_FOLDER, entry, API_KEY)
                 if not result.get('success'):
@@ -1557,13 +1744,22 @@ class UltraThinkWidget(QWidget):
 
     # Expand/collapse notes mode
     def toggle_expanded_mode(self):
-        self.expanded_mode = not self.expanded_mode
+        # If in minimal mode, exit it first and go to expanded
+        if self.minimal_mode:
+            self.exit_minimal_mode()
+            # Force expand mode on
+            self.expanded_mode = True
+        else:
+            self.expanded_mode = not self.expanded_mode
 
         if self.expanded_mode:
             # Expand: hide drop zone, show toolbar, make widget bigger
             self.drop_zone.hide()
             self.toolbar_widget.show()
-            self.resize(self.expanded_size[0], self.expanded_size[1])
+
+            # Get new size and ensure widget stays on screen
+            new_width, new_height = self.expanded_size
+            self._resize_and_keep_on_screen(new_width, new_height)
             # Update button to selected state
             self.expand_btn.setIcon(create_icon_from_svg(ICON_NOTEPAD, 16, "white"))
             self.expand_btn.setStyleSheet("""
@@ -1582,11 +1778,16 @@ class UltraThinkWidget(QWidget):
             self.autosave_timer.start(10000)
             # Reset note timestamp for fresh note
             self.current_note_timestamp = None
+            # Reset session ID (will be set on first save)
+            self.long_note_session_id = None
+            self._update_subnote_indicator()
         else:
             # Stop auto-save timer
             self.autosave_timer.stop()
-            # Clear note timestamp
+            # Clear note timestamp and session ID
             self.current_note_timestamp = None
+            self.long_note_session_id = None
+            self._update_subnote_indicator()
             # Collapse: hide toolbar, restore default size
             self.toolbar_widget.hide()
             self.resize(self.default_size[0], self.default_size[1])
@@ -1753,6 +1954,10 @@ class UltraThinkWidget(QWidget):
 
         # Update current_note_timestamp for auto-save
         self.current_note_timestamp = self.note_tabs[index]['timestamp']
+
+        # Sync session ID to current tab's timestamp (for sub-notes)
+        self.long_note_session_id = self.note_tabs[index]['timestamp']
+        self._update_subnote_indicator()
 
         # Rebuild tab bar to update active styling
         self._rebuild_tab_bar()
@@ -1968,30 +2173,18 @@ class UltraThinkWidget(QWidget):
                     'notes': text              # Markdown text saved here
                 }
 
-                result = append_to_kb(PROJECT_FOLDER, entry, API_KEY)
+                # Don't pass API_KEY here - AI processing runs on exit (collapse)
+                result = append_to_kb(PROJECT_FOLDER, entry, None)
                 if not result.get('success'):
                     raise Exception(result.get('error', 'Unknown error'))
-
-                # Run background processing (grammar, classification, summary) in thread
-                if API_KEY:
-                    background_task = result.pop('_background_task', None)
-                    if background_task:
-                        thread = threading.Thread(
-                            target=background_process_entry,
-                            args=(
-                                background_task['project_folder'],
-                                background_task['timestamp'],
-                                background_task['entry'],
-                                background_task['api_key'],
-                                background_task.get('file_path')
-                            )
-                        )
-                        thread.start()
 
                 # Store timestamp for subsequent updates
                 self.current_note_timestamp = timestamp
                 # Also update the tab's timestamp
                 self.note_tabs[self.current_tab_index]['timestamp'] = timestamp
+                # Establish session ID for sub-notes (audio/screenshots captured during this session)
+                self.long_note_session_id = timestamp
+                self._update_subnote_indicator()
 
             # Update tab's HTML (preserve formatting for display)
             self.note_tabs[self.current_tab_index]['html'] = html
@@ -2009,6 +2202,17 @@ class UltraThinkWidget(QWidget):
         """Restore save button to default state."""
         self.save_btn.setIcon(create_icon_from_svg(ICON_SAVE, 14, "#666"))
         self.save_btn.setEnabled(True)
+
+    def _update_subnote_indicator(self):
+        """Show/hide sub-note indicator based on session state."""
+        if self.expanded_mode and self.long_note_session_id:
+            self.subnote_indicator.setToolTip(
+                f"Session: {self.long_note_session_id}\n"
+                "Audio and screenshots will be linked to this note"
+            )
+            self.subnote_indicator.show()
+        else:
+            self.subnote_indicator.hide()
 
     def _autosave_expanded(self):
         """Auto-save in expanded mode every 10s if there's text."""
@@ -2092,7 +2296,7 @@ class UltraThinkWidget(QWidget):
                     background: #e04900;
                 }}
             """)
-            self.monitor_btn.setIcon(create_icon_from_svg(ICON_MONITOR, 16, "#fff"))
+            self.monitor_btn.setIcon(create_icon_from_svg(ICON_DESKTOP, 16, "#fff"))
             self.monitor_btn.setToolTip("Pinned to all virtual desktops (click to unpin)")
         else:
             # Inactive state
@@ -2105,7 +2309,7 @@ class UltraThinkWidget(QWidget):
                     background: #f5f5f5;
                 }
             """)
-            self.monitor_btn.setIcon(create_icon_from_svg(ICON_MONITOR, 16, "#666"))
+            self.monitor_btn.setIcon(create_icon_from_svg(ICON_DESKTOP, 16, "#666"))
             self.monitor_btn.setToolTip("Pin to all virtual desktops")
 
     def toggle_multi_monitor(self):
@@ -2117,6 +2321,135 @@ class UltraThinkWidget(QWidget):
             self._pin_to_all_desktops()
         else:
             self._unpin_from_all_desktops()
+
+    def enter_minimal_mode(self):
+        """Switch to minimal stripped-down view."""
+        self.minimal_mode = True
+
+        # Save current position for restore
+        self._pre_minimal_pos = self.pos()
+
+        # Hide header elements
+        self.title_label.hide()
+        self.shrink_btn.hide()
+        self.monitor_btn.hide()
+        self.close_btn.hide()
+
+        # Remove orange border, solid white background
+        self.container.setStyleSheet("""
+            QWidget#container {
+                background: white;
+                border: none;
+                border-radius: 8px;
+            }
+        """)
+
+        # Compact drop zone (single row height), hide text
+        self.drop_zone.setFixedHeight(30)
+        self.drop_label.hide()
+
+        # Hide formatting toolbar and tab bar
+        self.toolbar_widget.hide()
+        self.tab_bar_widget.hide()
+
+        # Hide file list, timer, status
+        self.file_label.hide()
+        self.timer_label.hide()
+        self.status_label.hide()
+
+        # Resize widget to minimal size
+        self.setMinimumSize(180, 140)
+        self.resize(200, 160)
+
+        # Move to bottom-right of screen
+        screen = QApplication.primaryScreen().availableGeometry()
+        self.move(screen.right() - self.width() - 10, screen.bottom() - self.height() - 10)
+
+    def exit_minimal_mode(self):
+        """Restore to standard UltraThink view."""
+        self.minimal_mode = False
+
+        # Show header elements
+        self.title_label.show()
+        self.shrink_btn.show()
+        self.monitor_btn.show()
+        self.close_btn.show()
+
+        # Restore orange border styling
+        self.container.setStyleSheet(f"""
+            QWidget#container {{
+                background: white;
+                border: {BORDER_WIDTH}px solid {BORDER_COLOR};
+                border-radius: 8px;
+            }}
+        """)
+
+        # Restore drop zone flexible height and show label
+        self.drop_zone.setMaximumHeight(16777215)  # QWIDGETSIZE_MAX
+        self.drop_zone.setMinimumHeight(0)
+        self.drop_label.setText("Drop files here")
+        self.drop_label.show()
+
+        # Restore action button styles
+        normal_btn_style = """
+            QPushButton {
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                padding: 6px 10px;
+                background: white;
+            }
+            QPushButton:hover {
+                background: #f5f5f5;
+            }
+        """
+        self.mic_btn.setStyleSheet(normal_btn_style)
+        self.system_btn.setStyleSheet(normal_btn_style)
+        self.screenshot_btn.setStyleSheet(normal_btn_style)
+        self.expand_btn.setStyleSheet(normal_btn_style)
+
+        # Show toolbar if expanded
+        if self.expanded_mode:
+            self.toolbar_widget.show()
+            if len(self.note_tabs) > 1:
+                self.tab_bar_widget.show()
+
+        # Restore minimum size
+        self.setMinimumSize(200, 200)
+
+        # Restore to default size
+        if self.expanded_mode:
+            self.resize(self.expanded_size[0], self.expanded_size[1])
+        else:
+            self.resize(self.default_size[0], self.default_size[1])
+
+        # Restore previous position if saved
+        if hasattr(self, '_pre_minimal_pos'):
+            self.move(self._pre_minimal_pos)
+
+    def _resize_and_keep_on_screen(self, new_width, new_height):
+        """Resize widget while ensuring it stays fully on screen."""
+        screen = QApplication.primaryScreen().availableGeometry()
+        current_pos = self.pos()
+
+        # Calculate new position to keep widget on screen
+        new_x = current_pos.x()
+        new_y = current_pos.y()
+
+        # If widget would extend beyond right edge, move left
+        if new_x + new_width > screen.right():
+            new_x = screen.right() - new_width
+
+        # If widget would extend beyond bottom edge, move up
+        if new_y + new_height > screen.bottom():
+            new_y = screen.bottom() - new_height
+
+        # Ensure not off left or top edge
+        new_x = max(screen.left(), new_x)
+        new_y = max(screen.top(), new_y)
+
+        # Apply resize and move
+        self.resize(new_width, new_height)
+        self.move(new_x, new_y)
 
     def _pin_to_all_desktops(self):
         """Pin widget to all Windows virtual desktops."""
@@ -2338,6 +2671,31 @@ class MirrorWidget(QWidget):
 
 
 def main():
+    widget_log("=" * 50)
+    widget_log("main() called - widget.pyw starting")
+    widget_log(f"  PID: {os.getpid()}")
+    widget_log(f"  LOCK_FILE: {LOCK_FILE}")
+    widget_log(f"  Lock exists: {LOCK_FILE.exists()}")
+
+    # Single-instance check - MUST be first
+    widget_log("Checking if widget is running...")
+    if is_widget_running():
+        widget_log("Widget IS running - focusing existing and exiting")
+        focus_existing_window()
+        sys.exit(0)
+
+    widget_log("Widget not running - acquiring lock...")
+    if not acquire_lock():
+        widget_log("ERROR: Failed to acquire lock - exiting")
+        sys.exit(1)
+
+    widget_log("Lock acquired - proceeding with startup")
+
+    # Update state file immediately after lock acquired
+    update_widget_state(True)
+    widget_log("State updated")
+    # Note: cleanup handlers registered via app.aboutToQuit later (not atexit, to avoid double-call)
+
     # Set Windows AppUserModelID for correct taskbar icon
     try:
         import ctypes
@@ -2414,6 +2772,8 @@ def main():
 
     # Cleanup on exit
     app.aboutToQuit.connect(stop_web_server)
+    app.aboutToQuit.connect(release_lock)
+    app.aboutToQuit.connect(lambda: update_widget_state(False))
 
     sys.exit(app.exec())
 

@@ -3,7 +3,7 @@
     {
       "id": "not-started",
       "name": "Not started",
-      "color": "#6b7280"
+      "color": "#fca5a5"
     },
     {
       "id": "in-progress",
@@ -14,11 +14,6 @@
       "id": "done",
       "name": "Done",
       "color": "#22c55e"
-    },
-    {
-      "id": "test",
-      "name": "Test",
-      "color": "#bc44c0"
     }
   ]
 }

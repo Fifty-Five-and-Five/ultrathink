@@ -14,7 +14,6 @@
   let isSelecting = false;
   let overlay, selectionBox;
   let selectionComplete = false;
-  let autoCapTimeout = null;
 
   function createOverlay() {
     log.debug('Creating overlay');
@@ -39,6 +38,7 @@
       background: rgba(66, 102, 204, 0.1);
       display: none;
       z-index: 2147483647;
+      pointer-events: none;
     `;
 
     document.body.appendChild(overlay);
@@ -52,18 +52,12 @@
     // Add ESC key support to cancel
     document.addEventListener('keydown', handleKeyDown);
 
-    // Auto-capture after 2 seconds if no interaction
-    autoCapTimeout = setTimeout(() => {
-      if (!selectionComplete) {
-        captureFullScreen();
-      }
-    }, 2000);
   }
 
   function handleKeyDown(e) {
     if (e.key === 'Escape') {
       log.debug('ESC pressed, canceling selection');
-      selectionComplete = true; // Prevent auto-capture
+      selectionComplete = true;
       cleanup();
     }
   }
@@ -101,14 +95,23 @@
     endX = e.clientX;
     endY = e.clientY;
 
-    // Get device pixel ratio to convert CSS pixels to physical pixels
+    const width = Math.abs(endX - startX);
+    const height = Math.abs(endY - startY);
+
+    // Single click (no meaningful drag) → full screen capture
+    if (width < 5 && height < 5) {
+      captureFullScreen();
+      return;
+    }
+
+    // Region selected → crop capture
     const dpr = window.devicePixelRatio || 1;
 
     const rect = {
       x: Math.min(startX, endX) * dpr,
       y: Math.min(startY, endY) * dpr,
-      width: Math.abs(endX - startX) * dpr,
-      height: Math.abs(endY - startY) * dpr
+      width: width * dpr,
+      height: height * dpr
     };
 
     cleanup();
@@ -142,11 +145,6 @@
   }
 
   function cleanup() {
-    // Clear timeout
-    if (autoCapTimeout) {
-      clearTimeout(autoCapTimeout);
-      autoCapTimeout = null;
-    }
     // Remove keydown listener
     document.removeEventListener('keydown', handleKeyDown);
     // Remove overlay elements

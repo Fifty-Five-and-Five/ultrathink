@@ -213,7 +213,14 @@ async function loadEntries() {
         if (!response.ok) throw new Error('Failed to fetch entries');
 
         allEntries = await response.json();
-        initTable(allEntries);
+
+        // If table exists, just replace data (preserves columns); otherwise init fresh
+        if (table) {
+            table.replaceData(allEntries);
+        } else {
+            initTable(allEntries);
+        }
+
         populateFilters(allEntries);
         updateEntryCount(allEntries.length);
         updateNavBadgeCounts();
@@ -231,6 +238,10 @@ function populateFilters(entries) {
     const entities = [...new Set(entries.map(e => e.entity).filter(Boolean))].sort();
 
     const typeSelect = document.getElementById('filterType');
+    // Clear existing options except first (All Types)
+    while (typeSelect.options.length > 1) {
+        typeSelect.remove(1);
+    }
     types.forEach(type => {
         const opt = document.createElement('option');
         opt.value = type;
@@ -240,6 +251,10 @@ function populateFilters(entries) {
 
     const entitySelect = document.getElementById('filterEntity');
     if (entitySelect) {
+        // Clear existing options except first (All Entities)
+        while (entitySelect.options.length > 1) {
+            entitySelect.remove(1);
+        }
         entities.forEach(entity => {
             const opt = document.createElement('option');
             opt.value = entity;
@@ -260,7 +275,6 @@ function initTable(entries) {
     table = new Tabulator("#kb-table", {
         data: entries,
         layout: "fitColumns",
-        responsiveLayout: "collapse",
         selectable: true,
         placeholder: "No entries found",
         height: "calc(100vh - 180px)",
@@ -324,6 +338,13 @@ function initTable(entries) {
                 title: "Status",
                 field: "taskStatus",
                 formatter: taskStatusFormatter,
+                width: 110,
+                visible: false  // Hidden by default, shown on Tasks page
+            },
+            {
+                title: "Due",
+                field: "dueDate",
+                formatter: dueDateFormatter,
                 width: 100,
                 visible: false  // Hidden by default, shown on Tasks page
             },
@@ -349,7 +370,7 @@ function initTable(entries) {
             {
                 title: "",
                 formatter: actionsFormatter,
-                width: 50,
+                width: 60,
                 headerSort: false,
                 hozAlign: "center"
             }
@@ -511,12 +532,12 @@ function categoryBadgeFormatter(cell) {
 }
 
 /**
- * Custom formatter for task status badge
+ * Custom formatter for task status badge (pastel colors)
  */
 const TASK_STATUS_COLORS = {
-    'not-started': '#6b7280',
-    'in-progress': '#3b82f6',
-    'done': '#22c55e'
+    'not-started': '#9ca3af',  // Pastel grey
+    'in-progress': '#93c5fd',  // Pastel blue
+    'done': '#86efac'          // Pastel green
 };
 
 const TASK_STATUS_LABELS = {
@@ -603,6 +624,27 @@ async function updateTaskStatus(timestamp, newStatus) {
 }
 
 /**
+ * Custom formatter for due date column
+ */
+function dueDateFormatter(cell) {
+    const data = cell.getRow().getData();
+    // Only show for task entities
+    if (data.entity !== 'task') return '';
+
+    const dueDate = cell.getValue();
+    if (!dueDate) return '';
+
+    const d = new Date(dueDate);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const isOverdue = d < today;
+    const dateStr = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+
+    return `<span class="due-date-badge${isOverdue ? ' overdue' : ''}">${escapeHtml(dateStr)}</span>`;
+}
+
+/**
  * Custom formatter for topics (tags) - click to visualise
  */
 function topicsFormatter(cell) {
@@ -665,10 +707,23 @@ function actionsFormatter(cell) {
  * Delete a single entry by timestamp
  */
 async function deleteEntry(timestamp) {
-    if (!confirm('Delete this entry? This will also delete any associated files.')) {
-        return;
-    }
+    // Find entry title for the confirm modal
+    const entry = allEntries.find(e => e.timestamp === timestamp);
+    const title = entry?.title || 'Untitled';
 
+    showConfirmModal(
+        'Delete Entry',
+        `Are you sure you want to delete "${title}"? This will also delete any associated files and cannot be undone.`,
+        'Delete',
+        () => performDeleteEntry(timestamp)
+    );
+}
+
+/**
+ * Perform the actual entry deletion (called after confirmation)
+ * @param {string} timestamp
+ */
+async function performDeleteEntry(timestamp) {
     try {
         const response = await fetch('/api/entries', {
             method: 'DELETE',
@@ -679,6 +734,11 @@ async function deleteEntry(timestamp) {
         const result = await response.json();
 
         if (result.success) {
+            // Remove from allEntries array
+            const idx = allEntries.findIndex(e => e.timestamp === timestamp);
+            if (idx !== -1) allEntries.splice(idx, 1);
+
+            // Remove from table
             const rows = table.getRows();
             for (const row of rows) {
                 if (row.getData().timestamp === timestamp) {
@@ -687,8 +747,8 @@ async function deleteEntry(timestamp) {
                 }
             }
             updateEntryCount(table.getDataCount());
+            updateNavBadgeCounts();
             showStatus('Entry deleted', 'success');
-            closeModal();
         } else {
             showStatus('Failed to delete: ' + result.error, 'error');
         }
@@ -705,10 +765,24 @@ async function deleteSelected() {
     const selected = table.getSelectedData();
     if (selected.length === 0) return;
 
-    if (!confirm(`Delete ${selected.length} selected entries?`)) {
-        return;
-    }
+    const count = selected.length;
+    const message = count === 1
+        ? `Are you sure you want to delete "${selected[0].title || 'Untitled'}"? This cannot be undone.`
+        : `Are you sure you want to delete ${count} entries? This cannot be undone.`;
 
+    showConfirmModal(
+        count === 1 ? 'Delete Entry' : 'Delete Entries',
+        message,
+        'Delete',
+        () => performDeleteSelected(selected)
+    );
+}
+
+/**
+ * Perform the actual deletion of selected entries (called after confirmation)
+ * @param {Array} selected - Array of selected entries
+ */
+async function performDeleteSelected(selected) {
     let deleted = 0;
     let errors = 0;
 
@@ -733,6 +807,7 @@ async function deleteSelected() {
     }
 
     await loadEntries();
+    navigateToPage(currentPage, null, true);  // Preserve column visibility after delete
 
     if (errors > 0) {
         showStatus(`Deleted ${deleted}, ${errors} failed`, 'error');
@@ -831,6 +906,8 @@ function setupEventListeners() {
     // Refresh button
     document.getElementById('refreshBtn').addEventListener('click', async () => {
         await loadEntries();
+        // Re-apply current page filters after refresh, preserving column visibility
+        navigateToPage(currentPage, null, true);
         showStatus('Refreshed', 'success');
     });
 
@@ -944,6 +1021,41 @@ function escapeHtml(text) {
 }
 
 /**
+ * Escape HTML but preserve line breaks as <br> tags
+ */
+function escapeHtmlWithBreaks(text) {
+    if (!text) return '';
+    return escapeHtml(text).replace(/\n/g, '<br>');
+}
+
+/**
+ * Show a toast notification
+ * @param {string} message - Message to display
+ * @param {number} duration - Duration in ms (default 3000)
+ */
+function showToast(message, duration = 3000) {
+    // Remove existing toast if any
+    const existing = document.querySelector('.toast-notification');
+    if (existing) existing.remove();
+
+    const toast = document.createElement('div');
+    toast.className = 'toast-notification';
+    toast.textContent = message;
+    document.body.appendChild(toast);
+
+    // Trigger animation
+    requestAnimationFrame(() => {
+        toast.classList.add('visible');
+    });
+
+    // Auto-remove
+    setTimeout(() => {
+        toast.classList.remove('visible');
+        setTimeout(() => toast.remove(), 300);
+    }, duration);
+}
+
+/**
  * Simple markdown to HTML renderer for notes display
  */
 function renderMarkdown(text) {
@@ -979,14 +1091,114 @@ function renderMarkdown(text) {
     // Wrap consecutive <li> in <ul>
     html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
 
-    // Line breaks (preserve single newlines as <br>)
-    html = html.replace(/\n/g, '<br>');
+    // Line breaks (single newline = paragraph gap)
+    html = html.replace(/\n/g, '<br><br>');
 
     // Clean up: remove <br> after block elements
     html = html.replace(/<\/(h[345]|blockquote|ul|li)><br>/g, '</$1>');
     html = html.replace(/<br><(h[345]|blockquote|ul)/g, '<$1');
 
     return html;
+}
+
+/**
+ * Render AI Summary - handles both plain text and structured JSON outputs
+ * @param {string} summary - The AI summary (plain text or JSON string)
+ * @returns {string} HTML to display
+ */
+function renderAiSummary(summary) {
+    if (!summary) return '';
+
+    // Strip OpenAI citation artifacts like "citeturn4news12turn1search0"
+    function stripCitations(text) {
+        if (!text) return text;
+        return text.replace(/cite(turn\d+\w*)+/g, '').trim();
+    }
+
+    // Check if it's a structured JSON output
+    if (summary.trim().startsWith('{')) {
+        try {
+            const data = JSON.parse(summary);
+
+            let html = '<div class="ai-summary-structured">';
+
+            // Handle different structured formats
+            // Brief summary - no "Summary:" prefix
+            if (data.brief) {
+                html += `<div class="ai-summary-brief">${escapeHtml(stripCitations(data.brief))}</div>`;
+            }
+
+            if (data.summary) {
+                // Audio format - no "Summary:" prefix
+                html += `<div class="ai-summary-brief">${escapeHtml(stripCitations(data.summary))}</div>`;
+            }
+
+            if (data.detailed) {
+                html += `<details class="ai-summary-details"><summary>Detailed analysis</summary><div>${renderMarkdown(stripCitations(data.detailed))}</div></details>`;
+            }
+
+            if (data.paragraph) {
+                html += `<details class="ai-summary-details"><summary>Paragraph summary</summary><div>${renderMarkdown(stripCitations(data.paragraph))}</div></details>`;
+            }
+
+            // Key points - collapsible, same style as detailed analysis
+            if (data.key_points && data.key_points.length > 0) {
+                html += `<details class="ai-summary-details"><summary>Key points</summary><ul class="ai-summary-keypoints-list">`;
+                data.key_points.forEach(point => {
+                    html += `<li>${escapeHtml(stripCitations(point))}</li>`;
+                });
+                html += `</ul></details>`;
+            }
+
+            // Content and sources - combined in one collapsible
+            if (data.context || (data.sources && data.sources.length > 0)) {
+                html += `<details class="ai-summary-details"><summary>Content and sources</summary><div>`;
+                if (data.context) {
+                    html += `<div class="ai-summary-context">${renderMarkdown(stripCitations(data.context))}</div>`;
+                }
+                if (data.sources && data.sources.length > 0) {
+                    html += `<ul class="ai-summary-sources-list">`;
+                    data.sources.forEach(s => {
+                        if (s.startsWith('http')) {
+                            html += `<li><a href="${escapeHtml(s)}" target="_blank">${escapeHtml(s)}</a></li>`;
+                        } else {
+                            html += `<li>${escapeHtml(s)}</li>`;
+                        }
+                    });
+                    html += `</ul>`;
+                }
+                html += `</div></details>`;
+            }
+
+            if (data.speakers && data.speakers.length > 0) {
+                html += `<details class="ai-summary-details"><summary>Speakers</summary><div class="ai-summary-speakers">${data.speakers.map(s => escapeHtml(s)).join(', ')}</div></details>`;
+            }
+
+            if (data.transcript) {
+                html += `<details class="ai-summary-details"><summary>Transcript</summary><div class="ai-transcript">${escapeHtml(stripCitations(data.transcript))}</div></details>`;
+            }
+
+            if (data.entities) {
+                const entities = data.entities;
+                const parts = [];
+                if (entities.people?.length) parts.push(`<strong>People:</strong> ${entities.people.map(p => escapeHtml(p)).join(', ')}`);
+                if (entities.topics?.length) parts.push(`<strong>Topics:</strong> ${entities.topics.map(t => escapeHtml(t)).join(', ')}`);
+                if (entities.places?.length) parts.push(`<strong>Places:</strong> ${entities.places.map(p => escapeHtml(p)).join(', ')}`);
+                if (entities.other?.length) parts.push(`<strong>Other:</strong> ${entities.other.map(o => escapeHtml(o)).join(', ')}`);
+                if (parts.length > 0) {
+                    html += `<div class="ai-summary-entities">${parts.join(' | ')}</div>`;
+                }
+            }
+
+            html += '</div>';
+            return html;
+        } catch (e) {
+            // Not valid JSON, fall through to plain text rendering
+        }
+    }
+
+    // Plain text - strip citations and use existing markdown renderer
+    return renderMarkdown(stripCitations(summary));
 }
 
 /**
@@ -1045,8 +1257,9 @@ function setupNavigation() {
  * Navigate to a specific page
  * @param {string} page - The page to navigate to
  * @param {Object} filterContext - Optional filter context {type, value} for visualisation
+ * @param {boolean} skipColumnReset - If true, preserve current column visibility (used during refresh)
  */
-function navigateToPage(page, filterContext = null) {
+function navigateToPage(page, filterContext = null, skipColumnReset = false) {
     currentPage = page;
 
     // Update URL hash for persistence across refresh
@@ -1067,7 +1280,9 @@ function navigateToPage(page, filterContext = null) {
     document.getElementById('topicsPage').classList.remove('active');
     document.getElementById('peoplePage').classList.remove('active');
     document.getElementById('visualisePage').classList.remove('active');
+    document.getElementById('visualise2Page').classList.remove('active');
     document.getElementById('searchPage').classList.remove('active');
+    document.getElementById('settingsPage').classList.remove('active');
     document.getElementById('logsPage').classList.remove('active');
 
     // Stop logs polling when navigating away
@@ -1075,6 +1290,7 @@ function navigateToPage(page, filterContext = null) {
 
     // Hide task filters by default
     document.getElementById('taskFilters').style.display = 'none';
+    document.getElementById('hideCompletedBtn').style.display = 'none';
 
     // Show appropriate content
     if (page === 'home') {
@@ -1122,6 +1338,7 @@ function navigateToPage(page, filterContext = null) {
             document.getElementById('filterEntity').value = 'task';
             // Show task filters for tasks page
             document.getElementById('taskFilters').style.display = 'flex';
+            document.getElementById('hideCompletedBtn').style.display = 'flex';
             // Initialize kanban if needed
             if (kanbanColumns.length === 0) {
                 initKanban();
@@ -1143,23 +1360,32 @@ function navigateToPage(page, filterContext = null) {
         applyFilters();
     }
 
-    // Toggle column visibility based on page
-    if (table) {
+    // Toggle column visibility based on page (skip during refresh to preserve user customizations)
+    if (table && !skipColumnReset) {
         if (page === 'task') {
-            // Show status and category columns on Tasks page
+            // Show status and due date on Tasks page, hide topics/people/category
             table.showColumn("taskStatus");
-            table.showColumn("category");
+            table.showColumn("dueDate");
             table.hideColumn("entity");
+            table.hideColumn("topics");
+            table.hideColumn("people");
+            table.hideColumn("category");
         } else if (page === 'all') {
             // Show entity column only on All page
             table.showColumn("entity");
+            table.showColumn("topics");
+            table.showColumn("people");
             table.hideColumn("taskStatus");
+            table.hideColumn("dueDate");
             table.hideColumn("category");
         } else {
-            // Hide status, category, and entity on Project/Knowledge pages
+            // Hide status, category, entity, and dueDate on Project/Knowledge pages
             table.hideColumn("taskStatus");
+            table.hideColumn("dueDate");
             table.hideColumn("category");
             table.hideColumn("entity");
+            table.showColumn("topics");
+            table.showColumn("people");
         }
     }
 }
@@ -2383,8 +2609,8 @@ function renderKanbanBoard() {
 
         html += `
             <div class="kanban-column" data-column-id="${escapeHtml(column.id)}">
-                <div class="kanban-column-header" style="border-color: ${column.color}; background: ${column.color}20;">
-                    <div class="kanban-color-bar" data-column-id="${escapeHtml(column.id)}" style="background: ${column.color};" title="Double-click to change color"></div>
+                <div class="kanban-column-header" data-column-id="${escapeHtml(column.id)}" title="Click to change color">
+                    <div class="kanban-color-bar" data-column-id="${escapeHtml(column.id)}" style="background: ${column.color};"></div>
                     <div class="kanban-header-content">
                         <span class="kanban-column-name" data-column-id="${escapeHtml(column.id)}" contenteditable="false" title="Click to rename">${escapeHtml(column.name)}</span>
                         <div class="kanban-header-actions">
@@ -2470,34 +2696,47 @@ function setupColumnInteractions() {
         });
     });
 
-    // Double-click color bar for color picker
-    document.querySelectorAll('.kanban-color-bar').forEach(bar => {
-        bar.addEventListener('dblclick', (e) => {
+    // Click on header (not on name or delete) shows color picker
+    document.querySelectorAll('.kanban-column-header').forEach(header => {
+        header.addEventListener('click', (e) => {
+            // Don't trigger if clicking on name (editable) or delete button
+            if (e.target.closest('.kanban-column-name') || e.target.closest('.kanban-delete-btn')) {
+                return;
+            }
             e.stopPropagation();
-            const columnId = bar.dataset.columnId;
-            showColorPicker(columnId, bar);
+            const columnId = header.dataset.columnId;
+            showColorPicker(columnId, header);
         });
     });
 }
 
 /**
- * Show color picker popup near the color bar
+ * Show color picker popup near the anchor element
  */
 function showColorPicker(columnId, anchorEl) {
     // Remove existing picker if any
     const existingPicker = document.querySelector('.kanban-color-picker');
     if (existingPicker) existingPicker.remove();
 
+    // More pastel colors
     const colors = [
-        '#6b7280', '#ef4444', '#f97316', '#eab308', '#22c55e',
-        '#14b8a6', '#06b6d4', '#3b82f6', '#8b5cf6', '#ec4899'
+        '#d1d5db', '#fca5a5', '#fdba74', '#fcd34d', '#86efac',
+        '#5eead4', '#7dd3fc', '#a5b4fc', '#c4b5fd', '#f9a8d4',
+        '#fda4af', '#a3e635'
     ];
 
     const picker = document.createElement('div');
     picker.className = 'kanban-color-picker';
-    picker.innerHTML = colors.map(color =>
-        `<div class="kanban-color-option" data-color="${color}" style="background:${color}"></div>`
-    ).join('');
+    picker.innerHTML = `
+        <div class="color-picker-grid">
+            ${colors.map(color =>
+                `<div class="kanban-color-option" data-color="${color}" style="background:${color}"></div>`
+            ).join('')}
+        </div>
+        <div class="color-picker-hex">
+            <input type="text" class="hex-input" placeholder="#hexcode" maxlength="7">
+        </div>
+    `;
 
     // Position near anchor
     const rect = anchorEl.getBoundingClientRect();
@@ -2508,12 +2747,22 @@ function showColorPicker(columnId, anchorEl) {
 
     document.body.appendChild(picker);
 
-    // Handle color selection
+    // Handle color selection from grid
     picker.addEventListener('click', async (e) => {
         const option = e.target.closest('.kanban-color-option');
         if (option) {
             const newColor = option.dataset.color;
             await updateColumnColor(columnId, newColor);
+            picker.remove();
+        }
+    });
+
+    // Handle hex input
+    const hexInput = picker.querySelector('.hex-input');
+    hexInput.addEventListener('input', async (e) => {
+        const hex = e.target.value;
+        if (/^#[0-9A-Fa-f]{6}$/.test(hex)) {
+            await updateColumnColor(columnId, hex);
             picker.remove();
         }
     });
@@ -2645,15 +2894,31 @@ function renderKanbanCard(task) {
 
     const isCompleted = task.taskStatus === 'done';
 
+    // Format combined date line: "Added x and due y" or just "Added x"
+    let dateLineHtml = '';
+    if (dateStr) {
+        let dateLine = `Added ${dateStr}`;
+        if (task.dueDate) {
+            const dueDate = new Date(task.dueDate);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const isOverdue = dueDate < today;
+            const dueDateStr = dueDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+            dateLine += isOverdue
+                ? ` and <span class="overdue-text">due ${dueDateStr}</span>`
+                : ` and due ${dueDateStr}`;
+        }
+        dateLineHtml = `<div class="kanban-card-date">${dateLine}</div>`;
+    }
+
     return `
         <div class="kanban-card${isCompleted ? ' completed' : ''}" draggable="true" data-timestamp="${escapeHtml(task.timestamp)}" onclick="openDetailPanel(allEntries.find(e => e.timestamp === '${escapeHtml(task.timestamp)}'))">
             <div class="kanban-card-title">${titleHtml}</div>
             <div class="kanban-card-meta">
                 <span class="type-badge" style="background:${typeColor};font-size:10px;padding:2px 6px">${escapeHtml(task.type)}</span>
-                ${task.topics && task.topics.length > 0 ? task.topics.slice(0, 2).map(t => `<span class="topic-tag" style="font-size:10px;padding:1px 6px">${escapeHtml(t)}</span>`).join('') : ''}
             </div>
             ${notesPreview ? `<div class="kanban-card-notes">${escapeHtml(notesPreview)}</div>` : ''}
-            ${dateStr ? `<div class="kanban-card-date">${dateStr}</div>` : ''}
+            ${dateLineHtml}
         </div>
     `;
 }
@@ -3570,91 +3835,6 @@ function escapeHtml(text) {
 
 let settingsInitialized = false;
 
-// Default prompts (same as in host.py)
-const DEFAULT_CLASSIFICATION_PROMPT = `Analyze this knowledge base entry and classify it as "project", "task", or "knowledge".
-
-Title: {title}
-URL: {url}
-Content: {content}
-
-ENTITY CLASSIFICATION (in priority order):
-- "project" = References a bigger initiative, project idea, feature request, or something to build. If you see the word "project" it is a project. A video or image on its own is rarely going to be a project unless associated text indicates.
-- "task" = Action item, reminder, todo, something that needs to be done. If you see the word "task" it is a task. Unless you already decided it's a project.
-- "knowledge" = Fact, reference, documentation, information to remember. Unless already decided it's a project or task.
-- "unclassified" = Cannot determine from the content.
-
-TOPIC EXTRACTION:
-Extract 1-5 topic tags. STRONGLY prefer existing topics: {existing_topics}
-- If a topic is similar to an existing one (e.g. "React" vs "ReactJS", "ML" vs "Machine Learning"), use the EXISTING one
-- Only create a new topic if nothing similar exists
-
-PEOPLE EXTRACTION:
-Extract any people names mentioned.
-STRONGLY prefer existing people: {existing_people}
-- If a name matches an existing person's first name, use the FULL existing name (e.g. "Kevin" -> "Kevin Smith")
-- If a name has a typo but is similar to existing (e.g. "Jon" vs "John"), use the EXISTING correct spelling
-- Only add new people if no similar match exists
-
-Return JSON only:
-{
-  "entity": "project|task|knowledge|unclassified",
-  "topics": ["topic1", "topic2"],
-  "people": ["Kevin Smith", "Jane Doe"]
-}`;
-
-const DEFAULT_GRAMMAR_PROMPT = `Fix spelling and grammar errors in this note. Use UK spelling and sentence case. Never use em dash. If you can improve wording and flow without losing meaning do that. If you cannot work out meaning then don't make major changes.
-Context: From {domain}
-Page: {title}
-Type: {type}
-Preserve technical terms, jargon, domain-specific language, brands, names of things, people etc. and capitalise them correctly.
-
-Original text: "{text}"
-
-Return JSON only:
-{"corrected": "the corrected text here"}`;
-
-const DEFAULT_IMAGE_PROMPT = `Describe what is shown in this image in 2-3 sentences. Focus on the key elements and purpose.`;
-
-const DEFAULT_AUDIO_PROMPT = `Analyze this audio transcript and provide:
-
-1. **Summary**: A 2-3 sentence description of what is discussed/happening in this audio.
-
-2. **Speakers**: Based on the content, speaking styles, and any context provided, attempt to identify who is speaking. List speakers as "Speaker 1", "Speaker 2" etc, and if you can infer names or roles from context, include them (e.g., "Speaker 1 (likely John, the manager)").
-
-3. **Transcript**: Include the full transcript below.
-{notes}
-
-TRANSCRIPT:
-{transcript}`;
-
-const DEFAULT_DOCUMENT_PROMPT = `Summarise this document in 2-3 sentences. What is the main topic and key points?
-
-{content}`;
-
-const DEFAULT_LINK_PROMPT = `Browse this URL and provide a comprehensive summary of the page content.
-
-URL: {url}
-Page title: {title}
-User notes: {notes}
-
-Search the web for useful links, evidence, extra context or additional information related to this page. Cite all sources in your response.
-
-Provide:
-1. A 2-3 sentence summary of what the page is about
-2. Key information, facts, or takeaways from the content
-3. Any relevant context, related links, or supporting evidence you found
-4. List all sources at the end`;
-
-const DEFAULT_TEXT_PROMPT = `Summarise this text in 1-2 sentences:
-
-{text}
-
-Return just the summary.`;
-
-const DEFAULT_RESEARCH_PROMPT = `Do background research on this topic and provide a 2-3 paragraph summary:
-
-{notes}`;
-
 /**
  * Initialize the settings page
  */
@@ -3667,32 +3847,6 @@ function initSettingsPage() {
 
         // Set up browse button
         document.getElementById('browseProjectFolderBtn').addEventListener('click', browseProjectFolder);
-
-        // Set up reset buttons
-        document.getElementById('resetClassificationPrompt').addEventListener('click', () => {
-            document.getElementById('settingClassificationPrompt').value = DEFAULT_CLASSIFICATION_PROMPT;
-        });
-        document.getElementById('resetGrammarPrompt').addEventListener('click', () => {
-            document.getElementById('settingGrammarPrompt').value = DEFAULT_GRAMMAR_PROMPT;
-        });
-        document.getElementById('resetImagePrompt').addEventListener('click', () => {
-            document.getElementById('settingImagePrompt').value = DEFAULT_IMAGE_PROMPT;
-        });
-        document.getElementById('resetAudioPrompt').addEventListener('click', () => {
-            document.getElementById('settingAudioPrompt').value = DEFAULT_AUDIO_PROMPT;
-        });
-        document.getElementById('resetDocumentPrompt').addEventListener('click', () => {
-            document.getElementById('settingDocumentPrompt').value = DEFAULT_DOCUMENT_PROMPT;
-        });
-        document.getElementById('resetLinkPrompt').addEventListener('click', () => {
-            document.getElementById('settingLinkPrompt').value = DEFAULT_LINK_PROMPT;
-        });
-        document.getElementById('resetTextPrompt').addEventListener('click', () => {
-            document.getElementById('settingTextPrompt').value = DEFAULT_TEXT_PROMPT;
-        });
-        document.getElementById('resetResearchPrompt').addEventListener('click', () => {
-            document.getElementById('settingResearchPrompt').value = DEFAULT_RESEARCH_PROMPT;
-        });
 
         settingsInitialized = true;
     }
@@ -3721,23 +3875,19 @@ async function loadSettings() {
         document.getElementById('settingCapsuleToken').value = settings.capsule_token || '';
         document.getElementById('settingOpenaiKey').value = settings.openai_api_key || '';
 
-        // Populate prompt fields (use saved value or default)
-        document.getElementById('settingClassificationPrompt').value =
-            settings.classification_prompt || DEFAULT_CLASSIFICATION_PROMPT;
-        document.getElementById('settingGrammarPrompt').value =
-            settings.grammar_prompt || DEFAULT_GRAMMAR_PROMPT;
-        document.getElementById('settingImagePrompt').value =
-            settings.image_prompt || DEFAULT_IMAGE_PROMPT;
-        document.getElementById('settingAudioPrompt').value =
-            settings.audio_prompt || DEFAULT_AUDIO_PROMPT;
-        document.getElementById('settingDocumentPrompt').value =
-            settings.document_prompt || DEFAULT_DOCUMENT_PROMPT;
-        document.getElementById('settingLinkPrompt').value =
-            settings.link_prompt || DEFAULT_LINK_PROMPT;
-        document.getElementById('settingTextPrompt').value =
-            settings.text_prompt || DEFAULT_TEXT_PROMPT;
-        document.getElementById('settingResearchPrompt').value =
-            settings.research_prompt || DEFAULT_RESEARCH_PROMPT;
+        // Populate prompt fields from settings.json (single source of truth)
+        document.getElementById('settingClassificationPrompt').value = settings.classification_prompt || '';
+        document.getElementById('settingImagePrompt').value = settings.image_prompt || '';
+        document.getElementById('settingAudioPrompt').value = settings.audio_prompt || '';
+        document.getElementById('settingDocumentPrompt').value = settings.document_prompt || '';
+        document.getElementById('settingLinkPrompt').value = settings.link_prompt || '';
+        document.getElementById('settingTextPrompt').value = settings.text_prompt || '';
+        document.getElementById('settingResearchPrompt').value = settings.research_prompt || '';
+
+        // Relationship prompts
+        document.getElementById('settingRelationshipExtractionPrompt').value = settings.relationship_extraction_prompt || '';
+        document.getElementById('settingRelationshipResolutionPrompt').value = settings.relationship_resolution_prompt || '';
+        document.getElementById('settingContentSimilarityPrompt').value = settings.content_similarity_prompt || '';
     } catch (error) {
         console.error('Failed to load settings:', error);
     }
@@ -3859,7 +4009,6 @@ async function savePrompts() {
     statusEl.className = 'settings-status';
 
     const classificationPrompt = document.getElementById('settingClassificationPrompt').value.trim();
-    const grammarPrompt = document.getElementById('settingGrammarPrompt').value.trim();
     const imagePrompt = document.getElementById('settingImagePrompt').value.trim();
     const audioPrompt = document.getElementById('settingAudioPrompt').value.trim();
     const documentPrompt = document.getElementById('settingDocumentPrompt').value.trim();
@@ -3867,16 +4016,23 @@ async function savePrompts() {
     const textPrompt = document.getElementById('settingTextPrompt').value.trim();
     const researchPrompt = document.getElementById('settingResearchPrompt').value.trim();
 
-    // Save empty string if user hasn't modified from default (saves storage)
+    // Relationship prompts
+    const relationshipExtractionPrompt = document.getElementById('settingRelationshipExtractionPrompt').value.trim();
+    const relationshipResolutionPrompt = document.getElementById('settingRelationshipResolutionPrompt').value.trim();
+    const contentSimilarityPrompt = document.getElementById('settingContentSimilarityPrompt').value.trim();
+
+    // Save prompts directly to settings.json (single source of truth)
     const settings = {
-        classification_prompt: (classificationPrompt === DEFAULT_CLASSIFICATION_PROMPT) ? '' : classificationPrompt,
-        grammar_prompt: (grammarPrompt === DEFAULT_GRAMMAR_PROMPT) ? '' : grammarPrompt,
-        image_prompt: (imagePrompt === DEFAULT_IMAGE_PROMPT) ? '' : imagePrompt,
-        audio_prompt: (audioPrompt === DEFAULT_AUDIO_PROMPT) ? '' : audioPrompt,
-        document_prompt: (documentPrompt === DEFAULT_DOCUMENT_PROMPT) ? '' : documentPrompt,
-        link_prompt: (linkPrompt === DEFAULT_LINK_PROMPT) ? '' : linkPrompt,
-        text_prompt: (textPrompt === DEFAULT_TEXT_PROMPT) ? '' : textPrompt,
-        research_prompt: (researchPrompt === DEFAULT_RESEARCH_PROMPT) ? '' : researchPrompt
+        classification_prompt: classificationPrompt,
+        image_prompt: imagePrompt,
+        audio_prompt: audioPrompt,
+        document_prompt: documentPrompt,
+        link_prompt: linkPrompt,
+        text_prompt: textPrompt,
+        research_prompt: researchPrompt,
+        relationship_extraction_prompt: relationshipExtractionPrompt,
+        relationship_resolution_prompt: relationshipResolutionPrompt,
+        content_similarity_prompt: contentSimilarityPrompt
     };
 
     try {
@@ -4092,45 +4248,63 @@ function openDetailPanel(entry) {
     currentDetailEntry = entry;
     const panel = document.getElementById('detailPanel');
     const bodyEl = document.getElementById('detailBody');
-    const typeText = document.getElementById('detailTypeText');
-    const typeBadge = document.getElementById('detailTypeBadge');
-
-    // Update type badge
-    typeText.textContent = entry.type.charAt(0).toUpperCase() + entry.type.slice(1);
-    typeBadge.querySelector('svg').innerHTML = getTypeIcon(entry.type);
 
     // Build body content
     let bodyHtml = '';
 
-    // Title section
+    // Title section with action buttons
     bodyHtml += `
-        <div class="detail-title">
-            ${entry.url
-                ? `<a href="${escapeHtml(entry.url)}" target="_blank">${escapeHtml(entry.title) || '(untitled)'}</a>`
-                : escapeHtml(entry.title) || '(untitled)'}
+        <div class="detail-title-row">
+            <div class="detail-title">
+                ${entry.url
+                    ? `<a href="${escapeHtml(entry.url)}" target="_blank">${escapeHtml(entry.title) || '(untitled)'}</a>`
+                    : escapeHtml(entry.title) || '(untitled)'}
+            </div>
+            <div class="detail-title-actions">
+                <button class="detail-action-btn detail-action-danger" id="detailDelete" title="Delete">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="3,6 5,6 21,6"/>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                        <line x1="10" y1="11" x2="10" y2="17"/>
+                        <line x1="14" y1="11" x2="14" y2="17"/>
+                    </svg>
+                </button>
+                <button class="detail-close" onclick="closeDetailPanel()" title="Close">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
         </div>
     `;
 
-    // Meta info
-    const metaParts = [];
-    if (entry.source) metaParts.push(entry.source);
-    if (entry.timestamp) {
-        const date = new Date(entry.timestamp.replace(/(\d{4}-\d{2}-\d{2})_(\d{2})-(\d{2})-(\d{2})/, '$1T$2:$3:$4'));
-        metaParts.push(date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }));
+    // Meta info with inline badges - "Captured by [source] at [date time] [entity] [category]"
+    bodyHtml += `<div class="detail-meta-row">`;
+    if (entry.source || entry.timestamp) {
+        let metaText = 'Captured';
+        if (entry.source) {
+            metaText += ` by ${entry.source}`;
+        }
+        if (entry.timestamp) {
+            const date = new Date(entry.timestamp.replace(/(\d{4}-\d{2}-\d{2})_(\d{2})-(\d{2})-(\d{2})/, '$1T$2:$3:$4'));
+            const dateStr = date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+            const timeStr = date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+            metaText += ` - ${dateStr} ${timeStr}`;
+        }
+        bodyHtml += `<span class="detail-meta-text">${metaText}</span>`;
     }
-    if (metaParts.length > 0) {
-        bodyHtml += `<div class="detail-meta">${metaParts.join(' • ')}</div>`;
-    }
-
-    // Entity and type badges
-    bodyHtml += `<div class="detail-badges">`;
-    if (entry.entity) {
+    // Entity badge - only show on "all" page
+    if (entry.entity && currentPage === 'all') {
         bodyHtml += `<span class="entity-badge" style="background:${ENTITY_COLORS[entry.entity] || ENTITY_COLORS.unclassified}">${escapeHtml(entry.entity)}</span>`;
     }
-    bodyHtml += `<span class="type-badge" style="background:${TYPE_COLORS[entry.type] || '#64748b'}">${escapeHtml(entry.type)}</span>`;
+    // Category badge (work/personal) - styled via CSS with #ff5200 outline
+    if (entry.category) {
+        bodyHtml += `<span class="category-badge">${escapeHtml(entry.category)}</span>`;
+    }
     bodyHtml += `</div>`;
 
-    // Task status dropdown (only for tasks)
+    // Task status and due date (only for tasks)
     if (entry.entity === 'task') {
         const currentStatus = entry.taskStatus || 'not-started';
         // Use kanbanColumns if loaded, otherwise use defaults
@@ -4139,29 +4313,53 @@ function openDetailPanel(entry) {
             { id: 'in-progress', name: 'In progress' },
             { id: 'done', name: 'Done' }
         ];
+        const currentStatusName = columns.find(c => c.id === currentStatus)?.name || currentStatus;
+
+        // Due date
+        const dueDate = entry.dueDate || '';
+        let dueDateDisplay = '';
+        if (dueDate) {
+            const d = new Date(dueDate);
+            dueDateDisplay = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+        }
+
+        // Status and Due on same line
         bodyHtml += `
-            <div class="detail-section detail-status-section">
-                <label class="detail-label">Status</label>
-                <select class="task-status-select" id="detailStatusSelect" data-timestamp="${escapeHtml(entry.timestamp)}">
-                    ${columns.map(col => `
-                        <option value="${escapeHtml(col.id)}" ${currentStatus === col.id ? 'selected' : ''}>${escapeHtml(col.name)}</option>
-                    `).join('')}
-                </select>
+            <div class="detail-section detail-status-due-section">
+                <div class="status-due-item">
+                    <label class="detail-label">Status</label>
+                    <div class="status-dropdown-wrapper" data-timestamp="${escapeHtml(entry.timestamp)}">
+                        <span class="status-display" onclick="toggleStatusDropdown(this)">${escapeHtml(currentStatusName)}</span>
+                        <div class="status-dropdown hidden">
+                            ${columns.map(col => `
+                                <div class="status-option${currentStatus === col.id ? ' selected' : ''}"
+                                     onclick="selectDetailStatus('${escapeHtml(entry.timestamp)}', '${escapeHtml(col.id)}', '${escapeHtml(col.name)}')">${escapeHtml(col.name)}</div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+                <div class="status-due-item">
+                    <label class="detail-label">Due</label>
+                    <div class="duedate-wrapper" data-timestamp="${escapeHtml(entry.timestamp)}">
+                        ${dueDate ? `
+                            <span class="duedate-display" onclick="openDueDatePicker(this)">${dueDateDisplay}</span>
+                            <button class="duedate-remove" onclick="removeDueDate('${escapeHtml(entry.timestamp)}')" title="Remove due date">&times;</button>
+                        ` : `
+                            <span class="duedate-placeholder" onclick="openDueDatePicker(this)">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+                                    <line x1="16" y1="2" x2="16" y2="6"/>
+                                    <line x1="8" y1="2" x2="8" y2="6"/>
+                                    <line x1="3" y1="10" x2="21" y2="10"/>
+                                </svg>
+                                Set due date
+                            </span>
+                            <input type="date" class="duedate-picker-hidden" onchange="setDueDate('${escapeHtml(entry.timestamp)}', this.value)">
+                        `}
+                    </div>
+                </div>
             </div>
         `;
-    }
-
-    // Tags (topics + people)
-    const hasTags = (entry.topics && entry.topics.length > 0) || (entry.people && entry.people.length > 0);
-    if (hasTags) {
-        bodyHtml += `<div class="detail-tags">`;
-        if (entry.topics && Array.isArray(entry.topics)) {
-            bodyHtml += entry.topics.map(t => `<span class="topic-tag">${escapeHtml(t)}</span>`).join('');
-        }
-        if (entry.people && Array.isArray(entry.people)) {
-            bodyHtml += entry.people.map(p => `<span class="person-tag">${escapeHtml(p)}</span>`).join('');
-        }
-        bodyHtml += `</div>`;
     }
 
     // Snippet (selected text)
@@ -4213,7 +4411,34 @@ function openDetailPanel(entry) {
                         </svg>
                     </button>
                 </div>
-                <div class="detail-ai-text">${escapeHtml(entry.aiSummary)}</div>
+                <div class="detail-ai-text">${renderAiSummary(entry.aiSummary)}</div>
+            </div>
+        `;
+    }
+
+    // Comments section (for tasks)
+    if (entry.entity === 'task') {
+        const comments = entry.comments || [];
+        bodyHtml += `
+            <div class="detail-section detail-comments-section">
+                <h4>Comments</h4>
+                <div class="comments-list">
+                    ${comments.map(c => `
+                        <div class="comment-item">
+                            <span class="comment-timestamp">${escapeHtml(c.timestamp)}</span>
+                            <span class="comment-text">${escapeHtml(c.text)}</span>
+                        </div>
+                    `).join('')}
+                </div>
+                <div class="comment-add">
+                    <textarea class="comment-input" id="newCommentText" placeholder="Add a comment..." rows="2"></textarea>
+                    <button class="comment-add-btn" onclick="addComment('${escapeHtml(entry.timestamp)}')" title="Add comment">
+                        <svg width="6" height="6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                    </button>
+                </div>
             </div>
         `;
     }
@@ -4310,35 +4535,130 @@ function openDetailPanel(entry) {
         bodyHtml += `</div>`;
     }
 
+    // Related entries section
+    const hasRelationships = entry.parentId || (entry.related && entry.related.length > 0) || (entry.similar && entry.similar.length > 0);
+    if (hasRelationships) {
+        bodyHtml += `<div class="detail-section detail-related-section">`;
+        bodyHtml += `<h4>Related</h4>`;
+
+        // Parent note (if this is a sub-note)
+        if (entry.parentId) {
+            const parentEntry = AppState.allEntries.find(e => e.timestamp === entry.parentId);
+            const parentTitle = parentEntry ? parentEntry.title || 'Parent Note' : 'Parent Note';
+            bodyHtml += `
+                <div class="related-group">
+                    <span class="related-label">Parent note</span>
+                    <div class="related-item" onclick="openDetailPanel('${escapeHtml(entry.parentId)}')" style="cursor:pointer">
+                        <span class="related-icon">📝</span>
+                        <span class="related-title">${escapeHtml(parentTitle)}</span>
+                        <span class="related-time">${formatTimestamp(entry.parentId)}</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Child notes (sub-notes where this entry is the parent)
+        const childEntries = AppState.allEntries.filter(e => e.parentId === entry.timestamp);
+        if (childEntries.length > 0) {
+            bodyHtml += `
+                <div class="related-group">
+                    <span class="related-label">Sub-notes (${childEntries.length})</span>
+            `;
+            childEntries.slice(0, 5).forEach(child => {
+                const icon = child.type === 'audio' ? '🎤' : child.type === 'screenshot' ? '📸' : '📄';
+                bodyHtml += `
+                    <div class="related-item" onclick="openDetailPanel('${escapeHtml(child.timestamp)}')" style="cursor:pointer">
+                        <span class="related-icon">${icon}</span>
+                        <span class="related-title">${escapeHtml(child.title || child.type)}</span>
+                        <span class="related-time">${formatTimestamp(child.timestamp)}</span>
+                    </div>
+                `;
+            });
+            if (childEntries.length > 5) {
+                bodyHtml += `<div class="related-more">+${childEntries.length - 5} more</div>`;
+            }
+            bodyHtml += `</div>`;
+        }
+
+        // AI-detected related entries (from notes)
+        if (entry.related && entry.related.length > 0) {
+            bodyHtml += `
+                <div class="related-group">
+                    <span class="related-label">Mentioned in notes (${entry.related.length})</span>
+            `;
+            entry.related.slice(0, 5).forEach(rel => {
+                const relEntry = AppState.allEntries.find(e => e.timestamp === rel.timestamp);
+                const relTitle = relEntry ? relEntry.title || 'Untitled' : 'Entry';
+                bodyHtml += `
+                    <div class="related-item" onclick="openDetailPanel('${escapeHtml(rel.timestamp)}')" style="cursor:pointer">
+                        <span class="related-icon">🔗</span>
+                        <span class="related-title">${escapeHtml(relTitle)}</span>
+                        <span class="related-type">${escapeHtml(rel.type)}</span>
+                    </div>
+                `;
+            });
+            bodyHtml += `</div>`;
+        }
+
+        // AI-detected similar entries
+        if (entry.similar && entry.similar.length > 0) {
+            bodyHtml += `
+                <div class="related-group">
+                    <span class="related-label">Similar entries (${entry.similar.length})</span>
+            `;
+            entry.similar.slice(0, 5).forEach(sim => {
+                const simEntry = AppState.allEntries.find(e => e.timestamp === sim.timestamp);
+                const simTitle = simEntry ? simEntry.title || 'Untitled' : 'Entry';
+                bodyHtml += `
+                    <div class="related-item" onclick="openDetailPanel('${escapeHtml(sim.timestamp)}')" style="cursor:pointer">
+                        <span class="related-icon">✨</span>
+                        <span class="related-title">${escapeHtml(simTitle)}</span>
+                        <span class="related-score">${sim.score}%</span>
+                    </div>
+                `;
+            });
+            bodyHtml += `</div>`;
+        }
+
+        bodyHtml += `</div>`;
+    }
+
+    // Tags bar at bottom: type badge + topics + people
+    const hasTags = entry.type || (entry.topics && entry.topics.length > 0) || (entry.people && entry.people.length > 0);
+    if (hasTags) {
+        bodyHtml += `<div class="detail-tags">`;
+        // Type badge first
+        if (entry.type) {
+            bodyHtml += `<span class="type-badge" style="background:${TYPE_COLORS[entry.type] || '#64748b'}">${escapeHtml(entry.type)}</span>`;
+        }
+        if (entry.topics && Array.isArray(entry.topics)) {
+            bodyHtml += entry.topics.map(t => `<span class="topic-tag">${escapeHtml(t)}</span>`).join('');
+        }
+        if (entry.people && Array.isArray(entry.people)) {
+            bodyHtml += entry.people.map(p => `<span class="person-tag">${escapeHtml(p)}</span>`).join('');
+        }
+        bodyHtml += `</div>`;
+    }
+
     bodyEl.innerHTML = bodyHtml;
 
     // Open panel
     panel.setAttribute('data-open', 'true');
     document.body.style.overflow = 'hidden';
 
-    // Set up action buttons
-    const openUrlBtn = document.getElementById('detailOpenUrl');
-    const copyUrlBtn = document.getElementById('detailCopyUrl');
+    // Set up delete button
     const deleteBtn = document.getElementById('detailDelete');
-
-    if (entry.url) {
-        openUrlBtn.style.display = '';
-        openUrlBtn.onclick = () => window.open(entry.url, '_blank');
-        copyUrlBtn.style.display = '';
-        copyUrlBtn.onclick = () => {
-            navigator.clipboard.writeText(entry.url);
-            showToast('URL copied to clipboard');
-        };
-    } else {
-        openUrlBtn.style.display = 'none';
-        copyUrlBtn.style.display = 'none';
-    }
-
     deleteBtn.onclick = () => {
-        if (confirm('Delete this entry?')) {
-            deleteEntry(entry.timestamp);
-            closeDetailPanel();
-        }
+        const title = entry.title || 'Untitled';
+        showConfirmModal(
+            'Delete Entry',
+            `Are you sure you want to delete "${title}"? This will also delete any associated files and cannot be undone.`,
+            'Delete',
+            () => {
+                performDeleteEntry(entry.timestamp);
+                closeDetailPanel();
+            }
+        );
     };
 
     // Set up status select for tasks
@@ -4380,6 +4700,14 @@ function closeDetailPanel() {
     document.body.style.overflow = '';
     currentDetailEntry = null;
     document.removeEventListener('keydown', handleDetailPanelEscape);
+    // Refresh view to show any changes made in detail panel
+    if (table) {
+        table.replaceData(allEntries);
+        applyFilters();
+    }
+    if (currentPage === 'task') {
+        renderKanbanBoard();
+    }
 }
 
 /**
@@ -4389,6 +4717,57 @@ function closeDetailPanel() {
 function handleDetailPanelEscape(e) {
     if (e.key === 'Escape') {
         closeDetailPanel();
+    }
+}
+
+/** Callback for confirm modal */
+let confirmModalCallback = null;
+
+/**
+ * Show confirm modal with custom message
+ * @param {string} title - Modal title
+ * @param {string} message - Modal message
+ * @param {string} confirmText - Text for confirm button
+ * @param {Function} onConfirm - Callback when confirmed
+ */
+function showConfirmModal(title, message, confirmText, onConfirm) {
+    const modal = document.getElementById('confirmModal');
+    document.getElementById('confirmModalTitle').textContent = title;
+    document.getElementById('confirmModalMessage').textContent = message;
+    const confirmBtn = document.getElementById('confirmModalConfirm');
+    confirmBtn.textContent = confirmText;
+    confirmModalCallback = onConfirm;
+
+    // Set up confirm button handler
+    confirmBtn.onclick = () => {
+        const callback = confirmModalCallback;
+        closeConfirmModal();
+        if (callback) {
+            callback();
+        }
+    };
+
+    modal.setAttribute('data-open', 'true');
+    document.addEventListener('keydown', handleConfirmModalEscape);
+}
+
+/**
+ * Close confirm modal
+ */
+function closeConfirmModal() {
+    const modal = document.getElementById('confirmModal');
+    modal.setAttribute('data-open', 'false');
+    confirmModalCallback = null;
+    document.removeEventListener('keydown', handleConfirmModalEscape);
+}
+
+/**
+ * Handle escape key for confirm modal
+ * @param {KeyboardEvent} e
+ */
+function handleConfirmModalEscape(e) {
+    if (e.key === 'Escape') {
+        closeConfirmModal();
     }
 }
 
@@ -4411,6 +4790,200 @@ function copyDetailContent(type) {
     navigator.clipboard.writeText(text).then(() => {
         showToast('Copied to clipboard');
     });
+}
+
+/**
+ * Toggle status dropdown in detail panel
+ * @param {HTMLElement} el - The status display element
+ */
+function toggleStatusDropdown(el) {
+    const dropdown = el.nextElementSibling;
+    const isHidden = dropdown.classList.contains('hidden');
+
+    // Close any other open dropdowns
+    document.querySelectorAll('.status-dropdown').forEach(d => d.classList.add('hidden'));
+
+    if (isHidden) {
+        dropdown.classList.remove('hidden');
+        // Close on outside click
+        setTimeout(() => {
+            document.addEventListener('click', closeStatusDropdownOnOutside);
+        }, 0);
+    }
+}
+
+function closeStatusDropdownOnOutside(e) {
+    if (!e.target.closest('.status-dropdown-wrapper')) {
+        document.querySelectorAll('.status-dropdown').forEach(d => d.classList.add('hidden'));
+        document.removeEventListener('click', closeStatusDropdownOnOutside);
+    }
+}
+
+/**
+ * Select status from dropdown in detail panel
+ */
+async function selectDetailStatus(timestamp, statusId, statusName) {
+    try {
+        const response = await fetch('/api/entries', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ timestamp, taskStatus: statusId })
+        });
+        const result = await response.json();
+        if (result.success) {
+            // Update local data
+            const entry = allEntries.find(e => e.timestamp === timestamp);
+            if (entry) entry.taskStatus = statusId;
+
+            // Update display
+            const wrapper = document.querySelector(`.status-dropdown-wrapper[data-timestamp="${timestamp}"]`);
+            if (wrapper) {
+                wrapper.querySelector('.status-display').textContent = statusName;
+                wrapper.querySelector('.status-dropdown').classList.add('hidden');
+            }
+
+            // Refresh grid and kanban
+            applyFilters();
+            renderKanbanBoard();
+            showToast('Status updated');
+        }
+    } catch (err) {
+        console.error('Failed to update status:', err);
+        showToast('Failed to update status');
+    }
+}
+
+/**
+ * Set due date for a task
+ */
+async function setDueDate(timestamp, dateValue) {
+    try {
+        const response = await fetch('/api/entries', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ timestamp, dueDate: dateValue })
+        });
+        const result = await response.json();
+        if (result.success) {
+            // Update local data
+            const entry = allEntries.find(e => e.timestamp === timestamp);
+            if (entry) entry.dueDate = dateValue;
+
+            // Re-open detail panel to refresh
+            if (currentDetailEntry && currentDetailEntry.timestamp === timestamp) {
+                openDetailPanel(entry);
+            }
+
+            // Refresh grid and kanban
+            applyFilters();
+            renderKanbanBoard();
+            showToast('Due date set');
+        } else {
+            console.error('Due date save failed:', result);
+            showToast(result.error || 'Failed to save due date');
+        }
+    } catch (err) {
+        console.error('Failed to set due date:', err);
+        showToast('Failed to set due date');
+    }
+}
+
+/**
+ * Remove due date from a task
+ */
+async function removeDueDate(timestamp) {
+    try {
+        const response = await fetch('/api/entries', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ timestamp, dueDate: '' })
+        });
+        const result = await response.json();
+        if (result.success) {
+            // Update local data
+            const entry = allEntries.find(e => e.timestamp === timestamp);
+            if (entry) entry.dueDate = '';
+
+            // Re-open detail panel to refresh
+            if (currentDetailEntry && currentDetailEntry.timestamp === timestamp) {
+                openDetailPanel(entry);
+            }
+
+            // Refresh grid and kanban
+            applyFilters();
+            renderKanbanBoard();
+            showToast('Due date removed');
+        }
+    } catch (err) {
+        console.error('Failed to remove due date:', err);
+        showToast('Failed to remove due date');
+    }
+}
+
+/**
+ * Open date picker when clicking on due date element
+ */
+function openDueDatePicker(el) {
+    const wrapper = el.closest('.duedate-wrapper');
+    // Check if there's a hidden date picker (for placeholder case)
+    const hiddenPicker = wrapper.querySelector('.duedate-picker-hidden');
+    if (hiddenPicker) {
+        hiddenPicker.showPicker();
+        return;
+    }
+    // Otherwise replace display with input (for existing date case)
+    const timestamp = wrapper.dataset.timestamp;
+    const entry = allEntries.find(e => e.timestamp === timestamp);
+    wrapper.innerHTML = `
+        <input type="date" class="duedate-picker" value="${entry?.dueDate || ''}"
+               onchange="setDueDate('${timestamp}', this.value)" autofocus>
+        <button class="duedate-remove" onclick="removeDueDate('${timestamp}')" title="Remove due date">&times;</button>
+    `;
+    wrapper.querySelector('.duedate-picker').showPicker();
+}
+
+/**
+ * Add a comment to a task
+ */
+async function addComment(timestamp) {
+    const textarea = document.getElementById('newCommentText');
+    const commentText = textarea?.value.trim();
+    if (!commentText) {
+        showToast('Please enter a comment');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/entries/comment', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ timestamp, comment: commentText })
+        });
+        const result = await response.json();
+        if (result.success) {
+            // Update local data
+            const entry = allEntries.find(e => e.timestamp === timestamp);
+            if (entry) {
+                if (!entry.comments) entry.comments = [];
+                entry.comments.push({ timestamp: result.timestamp, text: commentText });
+            }
+
+            // Clear textarea
+            textarea.value = '';
+
+            // Re-open detail panel to refresh
+            if (currentDetailEntry && currentDetailEntry.timestamp === timestamp) {
+                openDetailPanel(entry);
+            }
+            showToast('Comment added');
+        } else {
+            console.error('Failed to add comment:', result.error);
+            showToast(result.error || 'Failed to add comment');
+        }
+    } catch (err) {
+        console.error('Failed to add comment:', err);
+        showToast('Failed to add comment');
+    }
 }
 
 // =========================================

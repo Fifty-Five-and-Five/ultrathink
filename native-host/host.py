@@ -122,20 +122,18 @@ def update_settings(updates):
     return save_settings(settings)
 
 
-def get_prompt(settings, key, default):
+def get_prompt(settings, key):
     """
-    Get a prompt from settings, falling back to default if not set.
+    Get a prompt from settings.json.
 
     Args:
         settings (dict): Settings dictionary from load_settings().
         key (str): Settings key for the prompt (e.g., 'classification_prompt').
-        default (str): Default prompt to use if not in settings.
 
     Returns:
-        str: The prompt to use (custom or default).
+        str: The prompt from settings.
     """
-    custom = settings.get(key, '').strip()
-    return custom if custom else default
+    return settings.get(key, '').strip()
 
 
 def validate_project_folder(project_folder):
@@ -473,119 +471,6 @@ def save_entities(project_folder, entities):
         pass
 
 
-DEFAULT_CLASSIFICATION_PROMPT = """Analyze this knowledge base entry and classify it as "project", "task", or "knowledge".
-
-Title: {title}
-URL: {url}
-Content: {content}
-
-ENTITY CLASSIFICATION (in priority order):
-- "project" = References a bigger initiative, project idea, feature request, or something to build. If you see the word "project" it is a project. A video or image on its own is rarely going to be a project unless associated text indicates.
-- "task" = Action item, reminder, todo, something that needs to be done. If you see the word "task" it is a task. Unless you already decided it's a project.
-- "knowledge" = Fact, reference, documentation, information to remember. Unless already decided it's a project or task.
-- "unclassified" = Cannot determine from the content.
-
-TOPIC EXTRACTION:
-Extract 1-5 topic tags. STRONGLY prefer existing topics: {existing_topics}
-- If a topic is similar to an existing one (e.g. "React" vs "ReactJS", "ML" vs "Machine Learning"), use the EXISTING one
-- Only create a new topic if nothing similar exists
-
-PEOPLE EXTRACTION:
-Extract any people names mentioned.
-STRONGLY prefer existing people: {existing_people}
-- If a name matches an existing person's first name, use the FULL existing name (e.g. "Kevin" -> "Kevin Smith")
-- If a name has a typo but is similar to existing (e.g. "Jon" vs "John"), use the EXISTING correct spelling
-- Only add new people if no similar match exists
-
-Return JSON only:
-{
-  "entity": "project|task|knowledge|unclassified",
-  "topics": ["topic1", "topic2"],
-  "people": ["Kevin Smith", "Jane Doe"]
-}"""
-
-DEFAULT_GRAMMAR_PROMPT = """Fix spelling and grammar errors in this note. Use UK spelling and sentence case. Never use em dash. If you can improve wording and flow without losing meaning do that. If you cannot work out meaning then don't make major changes.
-Context: From {domain}
-Page: {title}
-Type: {type}
-Preserve technical terms, jargon, domain-specific language, brands, names of things, people etc. and capitalise them correctly.
-
-Original text: "{text}"
-
-Return JSON only:
-{{"corrected": "the corrected text here"}}"""
-
-DEFAULT_IMAGE_PROMPT = """Describe what is shown in this image in 2-3 sentences. Focus on the key elements and purpose."""
-
-DEFAULT_AUDIO_PROMPT = """Analyze this audio transcript and provide:
-
-1. **Summary**: A 2-3 sentence description of what is discussed/happening in this audio.
-
-2. **Speakers**: Based on the content, speaking styles, and any context provided, attempt to identify who is speaking. List speakers as "Speaker 1", "Speaker 2" etc, and if you can infer names or roles from context, include them (e.g., "Speaker 1 (likely John, the manager)").
-
-3. **Transcript**: Include the full transcript below.
-{notes}
-
-TRANSCRIPT:
-{transcript}"""
-
-DEFAULT_DOCUMENT_PROMPT = """Summarise this document in 2-3 sentences. What is the main topic and key points?
-
-{content}"""
-
-DEFAULT_LINK_PROMPT = """Browse this URL and provide a comprehensive summary of the page content.
-
-URL: {url}
-Page title: {title}
-User notes: {notes}
-
-Search the web for useful links, evidence, extra context or additional information related to this page. Cite all sources in your response.
-
-Provide:
-1. A 2-3 sentence summary of what the page is about
-2. Key information, facts, or takeaways from the content
-3. Any relevant context, related links, or supporting evidence you found
-4. List all sources at the end"""
-
-DEFAULT_TEXT_PROMPT = """Summarise this text in 1-2 sentences:
-
-{text}
-
-Return just the summary."""
-
-DEFAULT_RESEARCH_PROMPT = """Do background research on this topic and provide a 2-3 paragraph summary:
-
-{notes}"""
-
-DEFAULT_WORK_PERSONAL_PROMPT = """Based on all available information about this entry, classify it as either "work" or "personal".
-
-WORK indicators:
-- Fifty Five and Five (the company name or its clients/projects)
-- Client names, project names, business terminology
-- Professional tools (Jira, Azure DevOps, Notion workspaces, GitHub)
-- Technical/development content, code, software engineering
-- Meeting notes, proposals, documentation, invoices
-- Professional contacts, colleagues, clients
-
-PERSONAL indicators:
-- Family members: Katie, Georgia, Thomas
-- Personal admin (bills, appointments, home maintenance)
-- Hobbies, entertainment, personal interests, travel
-- Personal finance, health, fitness
-- Friends, personal social activities
-
-Entry information:
-- Title: {title}
-- URL: {url}
-- Notes: {notes}
-- Selected text: {selectedText}
-- AI Summary: {aiSummary}
-- Entity type: {entity}
-- Topics: {topics}
-- People: {people}
-
-Respond with exactly one word: work or personal"""
-
 
 def classify_entry(entry, api_key, existing_topics, existing_entities, ai_summary=None, custom_prompt=None):
     """
@@ -614,22 +499,57 @@ def classify_entry(entry, api_key, existing_topics, existing_entities, ai_summar
             content_parts.append(f"AI Description: {ai_summary}")
         content = ' '.join(part for part in content_parts if part).strip()
 
-        # Use custom prompt or default
-        prompt_template = custom_prompt if custom_prompt else DEFAULT_CLASSIFICATION_PROMPT
+        # Use prompt from settings
+        prompt_template = custom_prompt
 
         # Replace placeholders in prompt
         prompt = prompt_template.format(
             title=title,
             url=url,
             content=content,
+            notes=notes,
             existing_topics=existing_topics,
             existing_people=existing_entities
         )
 
-        # Call OpenAI Responses API
+        # Call OpenAI Responses API with Structured Outputs
         request_data = json.dumps({
             'model': 'gpt-5-nano',
-            'input': prompt
+            'input': prompt,
+            'text': {
+                'format': {
+                    'type': 'json_schema',
+                    'name': 'classification',
+                    'strict': True,
+                    'schema': {
+                        'type': 'object',
+                        'properties': {
+                            'entity': {
+                                'type': 'string',
+                                'enum': ['project', 'task', 'knowledge', 'unclassified']
+                            },
+                            'topics': {
+                                'type': 'array',
+                                'items': {'type': 'string'}
+                            },
+                            'people': {
+                                'type': 'array',
+                                'items': {'type': 'string'}
+                            },
+                            'category': {
+                                'type': 'string',
+                                'enum': ['work', 'personal']
+                            },
+                            'corrected_notes': {
+                                'type': 'string',
+                                'description': 'Grammar-corrected version of user notes'
+                            }
+                        },
+                        'required': ['entity', 'topics', 'people', 'category', 'corrected_notes'],
+                        'additionalProperties': False
+                    }
+                }
+            }
         }).encode('utf-8')
 
         req = urllib.request.Request(
@@ -644,271 +564,36 @@ def classify_entry(entry, api_key, existing_topics, existing_entities, ai_summar
         with urllib.request.urlopen(req, timeout=30) as response:
             result = json.loads(response.read().decode('utf-8'))
 
-        # Extract text from response
-        output_message = None
+        # Extract text from response - guaranteed valid JSON with structured outputs
         for item in result.get('output', []):
             if item.get('type') == 'message':
-                output_message = item
-                break
+                for content_item in item.get('content', []):
+                    if content_item.get('type') == 'output_text':
+                        text_content = content_item.get('text', '')
+                        classification = json.loads(text_content)
+                        with open(log_file, 'a', encoding='utf-8') as f:
+                            f.write(f"{datetime.now()}: AI classification result: {classification}\n")
+                        return classification
 
-        if not output_message:
-            return None
-
-        text_content = None
-        for content_item in output_message.get('content', []):
-            if content_item.get('type') == 'output_text':
-                text_content = content_item.get('text', '')
-                break
-
-        if not text_content:
-            return None
-
-        # Parse JSON from response (handle markdown code blocks)
-        json_text = text_content.strip()
-
-        # Log raw response for debugging
-        with open(log_file, 'a', encoding='utf-8') as f:
-            f.write(f"{datetime.now()}: Classification raw response: {json_text[:200]}...\n")
-
-        # Handle markdown code blocks (```json ... ``` or ``` ... ```)
-        if json_text.startswith('```'):
-            lines = json_text.split('\n')
-            # Remove first line (```json or ```)
-            lines = lines[1:]
-            # Remove last line if it's closing ```
-            if lines and lines[-1].strip() == '```':
-                lines = lines[:-1]
-            json_text = '\n'.join(lines)
-
-        # Try to parse JSON
-        try:
-            classification = json.loads(json_text)
-        except json.JSONDecodeError as je:
-            with open(log_file, 'a', encoding='utf-8') as f:
-                f.write(f"{datetime.now()}: Classification JSON parse error: {je}. Text was: {json_text[:100]}\n")
-            return None
-
-        with open(log_file, 'a', encoding='utf-8') as f:
-            f.write(f"{datetime.now()}: AI classification result: {classification}\n")
-
-        return classification
+        return None
 
     except urllib.error.HTTPError as e:
         with open(log_file, 'a', encoding='utf-8') as f:
             f.write(f"{datetime.now()}: AI classification HTTP error: {e.code} {e.reason}\n")
         return None
     except Exception as e:
+        import traceback
         with open(log_file, 'a', encoding='utf-8') as f:
             f.write(f"{datetime.now()}: AI classification error: {str(e)}\n")
+            f.write(f"{datetime.now()}: AI classification traceback: {traceback.format_exc()}\n")
         return None
-
-
-def classify_work_personal(entry, api_key, classification=None, ai_summary=None, custom_prompt=None):
-    """
-    Step 4: Classify entry as 'work' or 'personal' using OpenAI API.
-    Uses all available context including previous classification results.
-    Returns 'work' or 'personal', or None if classification fails.
-    """
-    log_file = Path(__file__).parent / 'host.log'
-
-    if not api_key:
-        with open(log_file, 'a', encoding='utf-8') as f:
-            f.write(f"{datetime.now()}: Work/personal classification skipped - no API key\n")
-        return None
-
-    try:
-        # Build context from entry and classification
-        title = entry.get('title', '')
-        url = entry.get('url', '')
-        notes = entry.get('notes', '')
-        selected_text = entry.get('selectedText', '')
-
-        # Get classification results if available
-        entity = classification.get('entity', '') if classification else ''
-        topics = ', '.join(classification.get('topics', [])) if classification else ''
-        people = ', '.join(classification.get('people', [])) if classification else ''
-
-        # Use custom prompt or default
-        prompt_template = custom_prompt if custom_prompt else DEFAULT_WORK_PERSONAL_PROMPT
-
-        # Replace placeholders in prompt
-        prompt = prompt_template.format(
-            title=title,
-            url=url,
-            notes=notes,
-            selectedText=selected_text,
-            aiSummary=ai_summary or '',
-            entity=entity,
-            topics=topics,
-            people=people
-        )
-
-        # Call OpenAI Responses API
-        request_data = json.dumps({
-            'model': 'gpt-5-nano',
-            'input': prompt
-        }).encode('utf-8')
-
-        req = urllib.request.Request(
-            'https://api.openai.com/v1/responses',
-            data=request_data,
-            headers={
-                'Content-Type': 'application/json',
-                'Authorization': f'Bearer {api_key}'
-            }
-        )
-
-        with urllib.request.urlopen(req, timeout=30) as response:
-            result = json.loads(response.read().decode('utf-8'))
-
-        # Extract text from response
-        output_message = None
-        for item in result.get('output', []):
-            if item.get('type') == 'message':
-                output_message = item
-                break
-
-        if not output_message:
-            return None
-
-        text_content = None
-        for content_item in output_message.get('content', []):
-            if content_item.get('type') == 'output_text':
-                text_content = content_item.get('text', '')
-                break
-
-        if not text_content:
-            return None
-
-        # Parse response - should be just "work" or "personal"
-        category = text_content.strip().lower()
-
-        # Validate response
-        if category not in ('work', 'personal'):
-            with open(log_file, 'a', encoding='utf-8') as f:
-                f.write(f"{datetime.now()}: Work/personal classification invalid response: {category}\n")
-            return None
-
-        with open(log_file, 'a', encoding='utf-8') as f:
-            f.write(f"{datetime.now()}: Work/personal classification result: {category}\n")
-
-        return category
-
-    except urllib.error.HTTPError as e:
-        with open(log_file, 'a', encoding='utf-8') as f:
-            f.write(f"{datetime.now()}: Work/personal classification HTTP error: {e.code} {e.reason}\n")
-        return None
-    except Exception as e:
-        with open(log_file, 'a', encoding='utf-8') as f:
-            f.write(f"{datetime.now()}: Work/personal classification error: {str(e)}\n")
-        return None
-
-
-def fix_grammar_openai(text, entry, api_key, custom_prompt=None):
-    """
-    Fix spelling and grammar using OpenAI API.
-    Returns corrected text or original if API fails.
-    custom_prompt: Optional custom prompt template with placeholders.
-    """
-    log_file = Path(__file__).parent / 'host.log'
-
-    if not text or not text.strip():
-        return text
-
-    if not api_key:
-        return text
-
-    try:
-        # Build context for better corrections
-        url = entry.get('url', '')
-        title = entry.get('title', '')[:100] if entry.get('title') else ''
-        entry_type = entry.get('type', '')
-        domain = ''
-
-        if url:
-            try:
-                from urllib.parse import urlparse
-                domain = urlparse(url).hostname or ''
-            except Exception:
-                pass
-
-        # Use custom prompt or default
-        prompt_template = custom_prompt if custom_prompt else DEFAULT_GRAMMAR_PROMPT
-
-        # Replace placeholders in prompt
-        prompt = prompt_template.format(
-            text=text,
-            domain=domain,
-            title=title,
-            type=entry_type
-        )
-
-        # Call OpenAI Responses API
-        request_data = json.dumps({
-            'model': 'gpt-5-nano',
-            'input': prompt
-        }).encode('utf-8')
-
-        req = urllib.request.Request(
-            'https://api.openai.com/v1/responses',
-            data=request_data,
-            headers={
-                'Content-Type': 'application/json',
-                'Authorization': f'Bearer {api_key}'
-            }
-        )
-
-        with urllib.request.urlopen(req, timeout=30) as response:
-            result = json.loads(response.read().decode('utf-8'))
-
-        # Extract text from response
-        output_message = None
-        for item in result.get('output', []):
-            if item.get('type') == 'message':
-                output_message = item
-                break
-
-        if not output_message:
-            return text
-
-        text_content = None
-        for content_item in output_message.get('content', []):
-            if content_item.get('type') == 'output_text':
-                text_content = content_item.get('text', '')
-                break
-
-        if not text_content:
-            return text
-
-        # Parse JSON response (handle markdown code blocks)
-        json_text = text_content.strip()
-        if json_text.startswith('```'):
-            lines = json_text.split('\n')
-            json_text = '\n'.join(lines[1:-1] if lines[-1] == '```' else lines[1:])
-
-        try:
-            grammar_result = json.loads(json_text)
-            fixed = grammar_result.get('corrected', text).strip()
-        except json.JSONDecodeError:
-            # Fallback: use raw text if JSON parsing fails
-            fixed = json_text.strip()
-
-        with open(log_file, 'a', encoding='utf-8') as f:
-            f.write(f"{datetime.now()}: Grammar fix: '{text[:50]}...' -> '{fixed[:50]}...'\n")
-
-        return fixed
-
-    except Exception as e:
-        with open(log_file, 'a', encoding='utf-8') as f:
-            f.write(f"{datetime.now()}: Grammar fix error: {str(e)}\n")
-        return text
 
 
 # =============================================================================
 # AI Summary Functions
 # =============================================================================
 
-def summarize_image(image_path, api_key, custom_prompt=None):
+def summarize_image(image_path, api_key, notes='', custom_prompt=None):
     """Generate summary of an image using GPT-5 vision."""
     log_file = Path(__file__).parent / 'host.log'
 
@@ -922,12 +607,13 @@ def summarize_image(image_path, api_key, custom_prompt=None):
         ext = Path(image_path).suffix.lower()
         mime_type = 'image/png' if ext == '.png' else 'image/jpeg'
 
-        # Use custom prompt or default
-        prompt = custom_prompt if custom_prompt else DEFAULT_IMAGE_PROMPT
+        # Use prompt from settings, format with notes
+        prompt = custom_prompt.format(notes=notes if notes else 'None')
 
-        # Call GPT-5 vision API
+        # Call GPT-5 vision API with web search
         request_data = json.dumps({
             'model': 'gpt-5',
+            'tools': [{'type': 'web_search'}],
             'input': [{
                 'role': 'user',
                 'content': [
@@ -946,7 +632,7 @@ def summarize_image(image_path, api_key, custom_prompt=None):
             }
         )
 
-        with urllib.request.urlopen(req, timeout=60) as response:
+        with urllib.request.urlopen(req, timeout=120) as response:
             result = json.loads(response.read().decode('utf-8'))
 
         # Extract text from response
@@ -972,9 +658,8 @@ def summarize_with_research(notes, api_key, custom_prompt=None):
     log_file = Path(__file__).parent / 'host.log'
 
     try:
-        # Use custom prompt or default
-        prompt_template = custom_prompt if custom_prompt else DEFAULT_RESEARCH_PROMPT
-        prompt = prompt_template.format(notes=notes)
+        # Use prompt from settings
+        prompt = custom_prompt.format(notes=notes)
 
         request_data = json.dumps({
             'model': 'gpt-5',
@@ -1057,14 +742,40 @@ def summarize_audio(audio_path, api_key, notes='', custom_prompt=None):
         with open(log_file, 'a', encoding='utf-8') as f:
             f.write(f"{datetime.now()}: Audio transcribed: {transcript[:100]}...\n")
 
-        # Build prompt using template
-        prompt_template = custom_prompt if custom_prompt else DEFAULT_AUDIO_PROMPT
-        notes_context = f'\n\nUser notes about this audio: {notes}' if notes else ''
-        prompt = prompt_template.format(notes=notes_context, transcript=transcript)
+        # Build prompt using template from settings
+        prompt = custom_prompt.format(notes=notes if notes else 'None', transcript=transcript)
 
+        # Use structured outputs for guaranteed JSON response
         summary_request = json.dumps({
             'model': 'gpt-5-nano',
-            'input': prompt
+            'input': prompt,
+            'text': {
+                'format': {
+                    'type': 'json_schema',
+                    'name': 'audio_analysis',
+                    'strict': True,
+                    'schema': {
+                        'type': 'object',
+                        'properties': {
+                            'summary': {
+                                'type': 'string',
+                                'description': 'Comprehensive summary of what is discussed/happening'
+                            },
+                            'speakers': {
+                                'type': 'array',
+                                'items': {'type': 'string'},
+                                'description': 'List of speakers identified (Speaker 1, Speaker 2, etc)'
+                            },
+                            'transcript': {
+                                'type': 'string',
+                                'description': 'The full transcript'
+                            }
+                        },
+                        'required': ['summary', 'speakers', 'transcript'],
+                        'additionalProperties': False
+                    }
+                }
+            }
         }).encode('utf-8')
 
         req = urllib.request.Request(
@@ -1083,9 +794,10 @@ def summarize_audio(audio_path, api_key, notes='', custom_prompt=None):
             if item.get('type') == 'message':
                 for content_item in item.get('content', []):
                     if content_item.get('type') == 'output_text':
+                        # Return JSON string (structured output)
                         summary = content_item.get('text', '').strip()
                         with open(log_file, 'a', encoding='utf-8') as f:
-                            f.write(f"{datetime.now()}: Audio summary generated: {summary[:100]}...\n")
+                            f.write(f"{datetime.now()}: Audio summary generated (structured): {summary[:100]}...\n")
                         return summary
 
         return None
@@ -1103,73 +815,176 @@ def summarize_document(file_path, entry_type, api_key, custom_prompt=None):
     try:
         content = None
 
-        # Use custom prompt or default
-        prompt_template = custom_prompt if custom_prompt else DEFAULT_DOCUMENT_PROMPT
+        # Use prompt from settings
+        prompt_template = custom_prompt
 
+        # Extract text based on document type
         if entry_type == 'markdown':
-            # Read markdown directly
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
+            with open(log_file, 'a', encoding='utf-8') as f:
+                f.write(f"{datetime.now()}: Markdown text read: {len(content)} chars\n")
+
         elif entry_type == 'pdf':
-            # Use GPT-5 vision for PDF (send as image)
-            with open(file_path, 'rb') as f:
-                pdf_data = f.read()
-            base64_pdf = base64.b64encode(pdf_data).decode('utf-8')
+            try:
+                import PyPDF2
+                with open(file_path, 'rb') as f:
+                    reader = PyPDF2.PdfReader(f)
+                    text_parts = []
+                    for page in reader.pages:
+                        page_text = page.extract_text()
+                        if page_text:
+                            text_parts.append(page_text)
+                    content = '\n'.join(text_parts)
+                with open(log_file, 'a', encoding='utf-8') as f:
+                    f.write(f"{datetime.now()}: PDF text extracted with PyPDF2: {len(content)} chars\n")
+            except ImportError:
+                with open(log_file, 'a', encoding='utf-8') as f:
+                    f.write(f"{datetime.now()}: PyPDF2 not installed - run: py -m pip install PyPDF2\n")
+                return None
+            except Exception as e:
+                with open(log_file, 'a', encoding='utf-8') as f:
+                    f.write(f"{datetime.now()}: PyPDF2 extraction failed: {str(e)}\n")
+                return None
 
-            # For PDFs, use the template but strip the {content} placeholder
-            pdf_prompt = prompt_template.replace('{content}', '').strip()
+        elif entry_type in ['ms-word', 'docx']:
+            try:
+                from docx import Document
+                doc = Document(file_path)
+                content = '\n'.join([p.text for p in doc.paragraphs if p.text.strip()])
+                with open(log_file, 'a', encoding='utf-8') as f:
+                    f.write(f"{datetime.now()}: Word text extracted with python-docx: {len(content)} chars\n")
+            except ImportError:
+                with open(log_file, 'a', encoding='utf-8') as f:
+                    f.write(f"{datetime.now()}: python-docx not installed - run: py -m pip install python-docx\n")
+                return None
+            except Exception as e:
+                with open(log_file, 'a', encoding='utf-8') as f:
+                    f.write(f"{datetime.now()}: Word extraction failed: {str(e)}\n")
+                return None
 
-            request_data = json.dumps({
-                'model': 'gpt-5',
-                'input': [{
-                    'role': 'user',
-                    'content': [
-                        {'type': 'input_text', 'text': pdf_prompt},
-                        {'type': 'input_file', 'file_data': f'data:application/pdf;base64,{base64_pdf}'}
-                    ]
-                }]
-            }).encode('utf-8')
+        elif entry_type in ['ms-excel', 'xlsx']:
+            try:
+                from openpyxl import load_workbook
+                wb = load_workbook(file_path, data_only=True)
+                text_parts = []
+                for sheet in wb.worksheets:
+                    text_parts.append(f"Sheet: {sheet.title}")
+                    for row in sheet.iter_rows(max_row=100, values_only=True):  # Limit rows
+                        row_text = ' | '.join([str(cell) for cell in row if cell is not None])
+                        if row_text.strip():
+                            text_parts.append(row_text)
+                content = '\n'.join(text_parts)
+                with open(log_file, 'a', encoding='utf-8') as f:
+                    f.write(f"{datetime.now()}: Excel text extracted with openpyxl: {len(content)} chars\n")
+            except ImportError:
+                with open(log_file, 'a', encoding='utf-8') as f:
+                    f.write(f"{datetime.now()}: openpyxl not installed - run: py -m pip install openpyxl\n")
+                return None
+            except Exception as e:
+                with open(log_file, 'a', encoding='utf-8') as f:
+                    f.write(f"{datetime.now()}: Excel extraction failed: {str(e)}\n")
+                return None
 
-            req = urllib.request.Request(
-                'https://api.openai.com/v1/responses',
-                data=request_data,
-                headers={
-                    'Content-Type': 'application/json',
-                    'Authorization': f'Bearer {api_key}'
-                }
-            )
+        elif entry_type in ['ms-powerpoint', 'pptx']:
+            try:
+                from pptx import Presentation
+                prs = Presentation(file_path)
+                text_parts = []
+                for slide_num, slide in enumerate(prs.slides, 1):
+                    slide_text = []
+                    for shape in slide.shapes:
+                        if hasattr(shape, 'text') and shape.text.strip():
+                            slide_text.append(shape.text)
+                    if slide_text:
+                        text_parts.append(f"Slide {slide_num}: " + ' | '.join(slide_text))
+                content = '\n'.join(text_parts)
+                with open(log_file, 'a', encoding='utf-8') as f:
+                    f.write(f"{datetime.now()}: PowerPoint text extracted with python-pptx: {len(content)} chars\n")
+            except ImportError:
+                with open(log_file, 'a', encoding='utf-8') as f:
+                    f.write(f"{datetime.now()}: python-pptx not installed - run: py -m pip install python-pptx\n")
+                return None
+            except Exception as e:
+                with open(log_file, 'a', encoding='utf-8') as f:
+                    f.write(f"{datetime.now()}: PowerPoint extraction failed: {str(e)}\n")
+                return None
 
-            with urllib.request.urlopen(req, timeout=60) as response:
-                result = json.loads(response.read().decode('utf-8'))
-
-            for item in result.get('output', []):
-                if item.get('type') == 'message':
-                    for content_item in item.get('content', []):
-                        if content_item.get('type') == 'output_text':
-                            summary = content_item.get('text', '').strip()
-                            with open(log_file, 'a', encoding='utf-8') as f:
-                                f.write(f"{datetime.now()}: PDF summary generated: {summary[:100]}...\n")
-                            return summary
-            return None
         else:
-            # For Office docs, try to read as text (basic approach)
-            # Full Office support would need python-docx, openpyxl, etc.
+            # Fallback: try to read as plain text
             try:
                 with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    content = f.read()[:5000]  # Limit to first 5000 chars
-            except Exception:
+                    content = f.read()
                 with open(log_file, 'a', encoding='utf-8') as f:
-                    f.write(f"{datetime.now()}: Could not read {entry_type} file as text\n")
+                    f.write(f"{datetime.now()}: {entry_type} read as plain text: {len(content)} chars\n")
+            except Exception as e:
+                with open(log_file, 'a', encoding='utf-8') as f:
+                    f.write(f"{datetime.now()}: Could not read {entry_type} file: {str(e)}\n")
                 return None
 
         if not content or len(content.strip()) < 10:
+            with open(log_file, 'a', encoding='utf-8') as f:
+                f.write(f"{datetime.now()}: Document text extraction yielded no content\n")
             return None
 
-        # Summarize the text content using template
-        prompt = prompt_template.format(content=content[:4000])
+        # Summarize using gpt-5-nano with structured outputs
+        prompt = prompt_template.format(content=content[:8000])
         request_data = json.dumps({
             'model': 'gpt-5-nano',
-            'input': prompt
+            'input': prompt,
+            'text': {
+                'format': {
+                    'type': 'json_schema',
+                    'name': 'document_summary',
+                    'strict': True,
+                    'schema': {
+                        'type': 'object',
+                        'properties': {
+                            'brief': {
+                                'type': 'string',
+                                'description': '1-2 sentence summary'
+                            },
+                            'paragraph': {
+                                'type': 'string',
+                                'description': 'Single paragraph summary'
+                            },
+                            'detailed': {
+                                'type': 'string',
+                                'description': 'Detailed multi-paragraph summary'
+                            },
+                            'entities': {
+                                'type': 'object',
+                                'properties': {
+                                    'people': {
+                                        'type': 'array',
+                                        'items': {'type': 'string'},
+                                        'description': 'Key people mentioned'
+                                    },
+                                    'topics': {
+                                        'type': 'array',
+                                        'items': {'type': 'string'},
+                                        'description': 'Key topics'
+                                    },
+                                    'places': {
+                                        'type': 'array',
+                                        'items': {'type': 'string'},
+                                        'description': 'Key places'
+                                    },
+                                    'other': {
+                                        'type': 'array',
+                                        'items': {'type': 'string'},
+                                        'description': 'Other relevant entities'
+                                    }
+                                },
+                                'required': ['people', 'topics', 'places', 'other'],
+                                'additionalProperties': False
+                            }
+                        },
+                        'required': ['brief', 'paragraph', 'detailed', 'entities'],
+                        'additionalProperties': False
+                    }
+                }
+            }
         }).encode('utf-8')
 
         req = urllib.request.Request(
@@ -1188,9 +1003,10 @@ def summarize_document(file_path, entry_type, api_key, custom_prompt=None):
             if item.get('type') == 'message':
                 for content_item in item.get('content', []):
                     if content_item.get('type') == 'output_text':
+                        # Return JSON string (structured output)
                         summary = content_item.get('text', '').strip()
                         with open(log_file, 'a', encoding='utf-8') as f:
-                            f.write(f"{datetime.now()}: Document summary generated: {summary[:100]}...\n")
+                            f.write(f"{datetime.now()}: Document summary generated (structured): {summary[:100]}...\n")
                         return summary
 
         return None
@@ -1234,16 +1050,51 @@ def summarize_link(entry, api_key, custom_prompt=None, text_prompt=None):
             # No URL to browse - fall back to basic summary
             return summarize_text(entry, api_key, text_prompt)
 
-        # Use custom prompt or default
-        prompt_template = custom_prompt if custom_prompt else DEFAULT_LINK_PROMPT
-        prompt = prompt_template.format(url=url, title=title, notes=notes if notes else 'None')
+        # Use prompt from settings
+        prompt = custom_prompt.format(url=url, title=title, notes=notes if notes else 'None')
 
+        # Use structured outputs with web search
         request_data = json.dumps({
             'model': 'gpt-5',
             'tools': [{'type': 'web_search'}],
             'include': ['web_search_call.action.sources'],
-            'reasoning': {'effort': 'medium'},
-            'input': prompt
+            'input': prompt,
+            'text': {
+                'format': {
+                    'type': 'json_schema',
+                    'name': 'link_summary',
+                    'strict': True,
+                    'schema': {
+                        'type': 'object',
+                        'properties': {
+                            'brief': {
+                                'type': 'string',
+                                'description': '2-3 sentence summary'
+                            },
+                            'detailed': {
+                                'type': 'string',
+                                'description': 'Detailed multi-paragraph analysis'
+                            },
+                            'key_points': {
+                                'type': 'array',
+                                'items': {'type': 'string'},
+                                'description': 'Key information, facts, takeaways'
+                            },
+                            'context': {
+                                'type': 'string',
+                                'description': 'Relevant context, related links, supporting evidence'
+                            },
+                            'sources': {
+                                'type': 'array',
+                                'items': {'type': 'string'},
+                                'description': 'Source URLs'
+                            }
+                        },
+                        'required': ['brief', 'detailed', 'key_points', 'context', 'sources'],
+                        'additionalProperties': False
+                    }
+                }
+            }
         }).encode('utf-8')
 
         req = urllib.request.Request(
@@ -1255,32 +1106,19 @@ def summarize_link(entry, api_key, custom_prompt=None, text_prompt=None):
             }
         )
 
-        with urllib.request.urlopen(req, timeout=120) as response:  # Longer timeout for reasoning
+        with urllib.request.urlopen(req, timeout=240) as response:  # 4 min timeout for web search + reasoning
             result = json.loads(response.read().decode('utf-8'))
 
-        # Extract summary text and sources
+        # Extract structured JSON response
         summary_text = None
-        sources = []
 
         for item in result.get('output', []):
             if item.get('type') == 'message':
                 for content_item in item.get('content', []):
                     if content_item.get('type') == 'output_text':
                         summary_text = content_item.get('text', '').strip()
-            elif item.get('type') == 'web_search_call':
-                # Extract sources if available
-                action = item.get('action', {})
-                for source in action.get('sources', []):
-                    source_url = source.get('url', '')
-                    source_title = source.get('title', '')
-                    if source_url:
-                        sources.append(f"[{source_title}]({source_url})" if source_title else source_url)
 
         if summary_text:
-            # Append sources if available
-            if sources:
-                summary_text += f"\n\nSources: {', '.join(sources[:3])}"  # Limit to 3 sources
-
             with open(log_file, 'a', encoding='utf-8') as f:
                 f.write(f"{datetime.now()}: Link summary generated (web+reasoning): {summary_text[:100]}...\n")
             return summary_text
@@ -1294,24 +1132,27 @@ def summarize_link(entry, api_key, custom_prompt=None, text_prompt=None):
 
 
 def summarize_text(entry, api_key, custom_prompt=None):
-    """Summarize text content (snippets, notes, ideas, paragraphs)."""
+    """Summarize text content (snippets, notes, ideas, paragraphs) with web search."""
     log_file = Path(__file__).parent / 'host.log'
 
     try:
         notes = entry.get('notes', '')
         selected_text = entry.get('selectedText', '')
 
-        # Use whichever text is available
-        text = selected_text or notes
-        if not text or not text.strip():
+        # Need at least one of selectedText or notes
+        if not selected_text and not notes:
             return None
 
-        # Use custom prompt or default
-        prompt_template = custom_prompt if custom_prompt else DEFAULT_TEXT_PROMPT
-        prompt = prompt_template.format(text=text[:2000])
+        # Use prompt from settings - send BOTH selectedText and notes
+        prompt = custom_prompt.format(
+            selectedText=selected_text[:2000] if selected_text else 'None',
+            notes=notes[:500] if notes else 'None'
+        )
 
+        # Use gpt-5 with web search for richer summaries
         request_data = json.dumps({
-            'model': 'gpt-5-nano',
+            'model': 'gpt-5',
+            'tools': [{'type': 'web_search'}],
             'input': prompt
         }).encode('utf-8')
 
@@ -1324,7 +1165,7 @@ def summarize_text(entry, api_key, custom_prompt=None):
             }
         )
 
-        with urllib.request.urlopen(req, timeout=30) as response:
+        with urllib.request.urlopen(req, timeout=90) as response:  # Longer timeout for web search
             result = json.loads(response.read().decode('utf-8'))
 
         for item in result.get('output', []):
@@ -1380,7 +1221,8 @@ def generate_ai_summary(entry_type, entry, file_path, api_key, prompts=None):
 
         if entry_type in IMAGE_TYPES:
             if file_path:
-                return summarize_image(file_path, api_key, prompts.get('image'))
+                notes = entry.get('notes', '')
+                return summarize_image(file_path, api_key, notes, prompts.get('image'))
         elif entry_type in RESEARCH_TYPES:
             notes = entry.get('notes', '')
             if notes:
@@ -1561,6 +1403,21 @@ def format_markdown_entry(entry, screenshot_path=None, file_path=None, classific
             lines.append(f"  - Notes: {note_lines[0]}")
             for line in note_lines[1:]:
                 lines.append(f"    {line}")
+
+    # Add relationship fields if present
+    parent_id = entry.get('parentId')
+    if parent_id:
+        lines.append(f"  - ParentId: {parent_id}")
+
+    related = entry.get('related')
+    if related:
+        # Format: timestamp (type), timestamp (type)
+        lines.append(f"  - Related: {related}")
+
+    similar = entry.get('similar')
+    if similar:
+        # Format: timestamp (score), timestamp (score)
+        lines.append(f"  - Similar: {similar}")
 
     # Add page metadata if present (optional fields)
     page_meta = entry.get('pageMetadata')
@@ -1937,15 +1794,629 @@ def update_entry_notes(project_folder, timestamp, new_notes):
         return False
 
 
+def truncate_entry_for_ai(entry, max_notes=200, max_summary=200):
+    """Prepare entry for AI comparison prompt with truncated fields."""
+    return {
+        'timestamp': entry.get('timestamp', ''),
+        'title': entry.get('title', '')[:100],
+        'entity': entry.get('entity', ''),
+        'topics': entry.get('topics', [])[:5],
+        'notes': entry.get('content', '')[:max_notes],
+        'summary': entry.get('aiSummary', '')[:max_summary]
+    }
+
+
+def load_all_entries(project_folder):
+    """Load and parse all entries from kb.md."""
+    log_file = Path(__file__).parent / 'host.log'
+    try:
+        is_valid, result = validate_project_folder(project_folder)
+        if not is_valid:
+            return []
+
+        folder_path = result
+        kb_file = folder_path / 'kb.md'
+
+        if not kb_file.exists():
+            return []
+
+        with open(kb_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        # Simple parsing - extract timestamp, title, entity, topics, notes from each entry
+        entries = []
+        current_entry = None
+
+        for line in content.split('\n'):
+            # New entry line
+            if line.startswith('- `') and '|' in line:
+                if current_entry:
+                    entries.append(current_entry)
+
+                # Parse: - `type` | `source` | `timestamp` | Title
+                parts = line.split('|')
+                if len(parts) >= 3:
+                    timestamp = parts[2].strip().strip('`')
+                    title_part = parts[3].strip() if len(parts) > 3 else ''
+                    # Extract title from [Title](url) or plain title
+                    if title_part.startswith('['):
+                        title = title_part.split(']')[0][1:]
+                    else:
+                        title = title_part
+
+                    current_entry = {
+                        'timestamp': timestamp,
+                        'title': title,
+                        'entity': '',
+                        'topics': [],
+                        'people': [],
+                        'content': '',
+                        'aiSummary': ''
+                    }
+            elif current_entry and line.startswith('  - '):
+                content_line = line[4:]
+                if content_line.startswith('Notes: '):
+                    current_entry['content'] = content_line[7:]
+                elif content_line.startswith('Entity: '):
+                    current_entry['entity'] = content_line[8:]
+                elif content_line.startswith('Topics: '):
+                    current_entry['topics'] = [t.strip() for t in content_line[8:].split(',')]
+                elif content_line.startswith('People: '):
+                    current_entry['people'] = [p.strip() for p in content_line[8:].split(',')]
+                elif content_line.startswith('AI Summary: '):
+                    current_entry['aiSummary'] = content_line[12:]
+
+        if current_entry:
+            entries.append(current_entry)
+
+        return entries
+
+    except Exception as e:
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: load_all_entries error: {str(e)}\n")
+        return []
+
+
+def fuzzy_search_candidates(all_entries, target_description, target_type, temporal_hint, current_timestamp, max_candidates=50):
+    """
+    Find candidate entries that might match a reference using fuzzy keyword scoring.
+
+    Args:
+        all_entries: List of all parsed entries
+        target_description: What the user is referring to (e.g., "ultrathink project")
+        target_type: Entity type filter (project/task/knowledge/any)
+        temporal_hint: Time filter (recent/yesterday/last_week/last_month/none)
+        current_timestamp: Current entry timestamp for relative time calculations
+        max_candidates: Maximum candidates to return
+
+    Returns:
+        List of candidate entries sorted by relevance score
+    """
+    from datetime import datetime, timedelta
+
+    target_lower = target_description.lower()
+    target_words = set(target_lower.split())
+    candidates = []
+
+    # Parse current timestamp for temporal filtering
+    try:
+        current_dt = datetime.strptime(current_timestamp, '%Y-%m-%d %H:%M:%S')
+    except:
+        current_dt = datetime.now()
+
+    for entry in all_entries:
+        # Skip self
+        if entry.get('timestamp') == current_timestamp:
+            continue
+
+        score = 0
+
+        # Filter by entity type if specified
+        if target_type and target_type != 'any':
+            if entry.get('entity') != target_type:
+                continue
+
+        # Apply temporal filter
+        if temporal_hint and temporal_hint != 'none':
+            try:
+                entry_dt = datetime.strptime(entry['timestamp'], '%Y-%m-%d %H:%M:%S')
+                days_ago = (current_dt - entry_dt).days
+
+                if temporal_hint == 'yesterday' and days_ago != 1:
+                    continue
+                elif temporal_hint == 'recent' and days_ago > 7:
+                    continue
+                elif temporal_hint == 'last_week' and days_ago > 14:
+                    continue
+                elif temporal_hint == 'last_month' and days_ago > 45:
+                    continue
+            except:
+                pass
+
+        # Score by title match (highest weight)
+        title_lower = entry.get('title', '').lower()
+        if target_lower in title_lower:
+            score += 50
+        else:
+            title_words = set(title_lower.split())
+            overlap = len(target_words & title_words)
+            score += overlap * 15
+
+        # Score by topic match
+        for topic in entry.get('topics', []):
+            if topic.lower() in target_lower or target_lower in topic.lower():
+                score += 25
+
+        # Score by notes content match
+        notes_lower = entry.get('content', '').lower()
+        if target_lower in notes_lower:
+            score += 20
+        else:
+            notes_words = set(notes_lower.split())
+            overlap = len(target_words & notes_words)
+            score += overlap * 5
+
+        if score > 0:
+            candidates.append({'entry': entry, 'score': score})
+
+    # Sort by score descending
+    candidates.sort(key=lambda x: x['score'], reverse=True)
+    return [c['entry'] for c in candidates[:max_candidates]]
+
+
+def extract_relationships(entry, api_key, custom_prompt):
+    """
+    Step 5a: Use AI to extract relationship references from notes.
+
+    Returns dict with 'references' list and 'has_relationships' boolean.
+    """
+    log_file = Path(__file__).parent / 'host.log'
+
+    notes = entry.get('notes', '').strip()
+    if not notes or len(notes) < 10:
+        return {'references': [], 'has_relationships': False}
+
+    try:
+        prompt = custom_prompt.format(
+            notes=notes,
+            title=entry.get('title', ''),
+            topics=', '.join(entry.get('topics', []))
+        )
+
+        # Call OpenAI Responses API with Structured Outputs
+        request_data = json.dumps({
+            'model': 'gpt-5-nano',
+            'input': prompt,
+            'text': {
+                'format': {
+                    'type': 'json_schema',
+                    'name': 'relationship_extraction',
+                    'strict': True,
+                    'schema': {
+                        'type': 'object',
+                        'properties': {
+                            'references': {
+                                'type': 'array',
+                                'items': {
+                                    'type': 'object',
+                                    'properties': {
+                                        'phrase': {'type': 'string'},
+                                        'target': {'type': 'string'},
+                                        'type': {'type': 'string', 'enum': ['project', 'task', 'knowledge', 'any']},
+                                        'temporal': {'type': 'string', 'enum': ['recent', 'yesterday', 'last_week', 'last_month', 'none']}
+                                    },
+                                    'required': ['phrase', 'target', 'type', 'temporal'],
+                                    'additionalProperties': False
+                                }
+                            },
+                            'has_relationships': {'type': 'boolean'}
+                        },
+                        'required': ['references', 'has_relationships'],
+                        'additionalProperties': False
+                    }
+                }
+            }
+        }).encode('utf-8')
+
+        req = urllib.request.Request(
+            'https://api.openai.com/v1/responses',
+            data=request_data,
+            headers={
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {api_key}'
+            }
+        )
+
+        with urllib.request.urlopen(req, timeout=30) as response:
+            result = json.loads(response.read().decode('utf-8'))
+
+        # Extract text from response - guaranteed valid JSON with structured outputs
+        for item in result.get('output', []):
+            if item.get('type') == 'message':
+                for content_item in item.get('content', []):
+                    if content_item.get('type') == 'output_text':
+                        text_content = content_item.get('text', '')
+                        return json.loads(text_content)
+
+        return {'references': [], 'has_relationships': False}
+
+    except Exception as e:
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: extract_relationships error: {str(e)}\n")
+        return {'references': [], 'has_relationships': False}
+
+
+def resolve_with_ai(phrase, target, candidates, api_key, custom_prompt):
+    """
+    Step 5b: Use AI to pick the best match from fuzzy search candidates.
+
+    Returns dict with 'timestamp' (or null) and 'confidence'.
+    """
+    log_file = Path(__file__).parent / 'host.log'
+
+    if not candidates:
+        return {'timestamp': None, 'confidence': 'none'}
+
+    try:
+        # Format candidates for prompt (truncated)
+        candidates_text = ""
+        for i, entry in enumerate(candidates[:20], 1):  # Limit to top 20
+            truncated = truncate_entry_for_ai(entry)
+            candidates_text += f"\n[{i}] {truncated['timestamp']} | {truncated['title']}"
+            if truncated['entity']:
+                candidates_text += f" | {truncated['entity']}"
+            if truncated['topics']:
+                candidates_text += f" | Topics: {', '.join(truncated['topics'][:3])}"
+            if truncated['notes']:
+                candidates_text += f"\n    Notes: {truncated['notes'][:150]}..."
+
+        prompt = custom_prompt.format(
+            phrase=phrase,
+            target=target,
+            candidates=candidates_text
+        )
+
+        # Call OpenAI Responses API with Structured Outputs
+        request_data = json.dumps({
+            'model': 'gpt-5-nano',
+            'input': prompt,
+            'text': {
+                'format': {
+                    'type': 'json_schema',
+                    'name': 'relationship_resolution',
+                    'strict': True,
+                    'schema': {
+                        'type': 'object',
+                        'properties': {
+                            'timestamp': {'type': ['string', 'null']},
+                            'confidence': {'type': 'string', 'enum': ['high', 'medium', 'low', 'none']}
+                        },
+                        'required': ['timestamp', 'confidence'],
+                        'additionalProperties': False
+                    }
+                }
+            }
+        }).encode('utf-8')
+
+        req = urllib.request.Request(
+            'https://api.openai.com/v1/responses',
+            data=request_data,
+            headers={
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {api_key}'
+            }
+        )
+
+        with urllib.request.urlopen(req, timeout=30) as response:
+            result = json.loads(response.read().decode('utf-8'))
+
+        # Extract text from response - guaranteed valid JSON with structured outputs
+        for item in result.get('output', []):
+            if item.get('type') == 'message':
+                for content_item in item.get('content', []):
+                    if content_item.get('type') == 'output_text':
+                        text_content = content_item.get('text', '')
+                        return json.loads(text_content)
+
+        return {'timestamp': None, 'confidence': 'none'}
+
+    except Exception as e:
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: resolve_with_ai error: {str(e)}\n")
+        return {'timestamp': None, 'confidence': 'none'}
+
+
+def get_similarity_candidates(all_entries, current_entry, max_candidates=100):
+    """
+    Pre-filter entries for content similarity comparison.
+
+    Prioritizes entries with:
+    - Same topics (highest)
+    - Same entity type
+    - Same people
+    - Recent entries (last 30 days)
+    """
+    from datetime import datetime, timedelta
+
+    current_timestamp = current_entry.get('timestamp', '')
+    current_topics = set(current_entry.get('topics', []))
+    current_entity = current_entry.get('entity', '')
+    current_people = set(current_entry.get('people', []))
+
+    try:
+        current_dt = datetime.strptime(current_timestamp, '%Y-%m-%d %H:%M:%S')
+    except:
+        current_dt = datetime.now()
+
+    candidates = []
+
+    for entry in all_entries:
+        # Skip self
+        if entry.get('timestamp') == current_timestamp:
+            continue
+
+        score = 0
+        entry_topics = set(entry.get('topics', []))
+        entry_people = set(entry.get('people', []))
+
+        # Topic overlap (highest priority)
+        topic_overlap = len(current_topics & entry_topics)
+        score += topic_overlap * 30
+
+        # Same entity type
+        if entry.get('entity') == current_entity and current_entity:
+            score += 15
+
+        # People overlap
+        people_overlap = len(current_people & entry_people)
+        score += people_overlap * 25
+
+        # Recency bonus
+        try:
+            entry_dt = datetime.strptime(entry['timestamp'], '%Y-%m-%d %H:%M:%S')
+            days_ago = (current_dt - entry_dt).days
+            if days_ago <= 7:
+                score += 20
+            elif days_ago <= 30:
+                score += 10
+        except:
+            pass
+
+        if score > 0:
+            candidates.append({'entry': entry, 'score': score})
+
+    # Sort by score and return top candidates
+    candidates.sort(key=lambda x: x['score'], reverse=True)
+    return [c['entry'] for c in candidates[:max_candidates]]
+
+
+def find_similar_entries(entry, candidates, api_key, custom_prompt):
+    """
+    Step 6: Use AI to find semantically similar entries.
+
+    Returns list of {'timestamp', 'score', 'reason'} for similar entries.
+    """
+    log_file = Path(__file__).parent / 'host.log'
+
+    if not candidates:
+        return []
+
+    try:
+        # Format new entry
+        new_entry_text = f"""Title: {entry.get('title', '')}
+Topics: {', '.join(entry.get('topics', []))}
+Entity: {entry.get('entity', '')}
+Notes: {entry.get('notes', '')[:300]}
+Summary: {entry.get('aiSummary', '')[:300]}"""
+
+        # Format candidates (truncated)
+        candidates_text = ""
+        for i, cand in enumerate(candidates[:50], 1):  # Limit to 50
+            truncated = truncate_entry_for_ai(cand, max_notes=150, max_summary=150)
+            candidates_text += f"\n[{i}] {truncated['timestamp']} | {truncated['title']}"
+            if truncated['entity']:
+                candidates_text += f" ({truncated['entity']})"
+            if truncated['topics']:
+                candidates_text += f" | {', '.join(truncated['topics'])}"
+            if truncated['notes']:
+                candidates_text += f"\n    {truncated['notes']}"
+
+        prompt = custom_prompt.format(
+            new_entry=new_entry_text,
+            candidates=candidates_text
+        )
+
+        # Call OpenAI Responses API with Structured Outputs
+        request_data = json.dumps({
+            'model': 'gpt-5-nano',
+            'input': prompt,
+            'text': {
+                'format': {
+                    'type': 'json_schema',
+                    'name': 'content_similarity',
+                    'strict': True,
+                    'schema': {
+                        'type': 'object',
+                        'properties': {
+                            'similar': {
+                                'type': 'array',
+                                'items': {
+                                    'type': 'object',
+                                    'properties': {
+                                        'timestamp': {'type': 'string'},
+                                        'score': {'type': 'integer'},
+                                        'reason': {'type': 'string'}
+                                    },
+                                    'required': ['timestamp', 'score', 'reason'],
+                                    'additionalProperties': False
+                                }
+                            }
+                        },
+                        'required': ['similar'],
+                        'additionalProperties': False
+                    }
+                }
+            }
+        }).encode('utf-8')
+
+        req = urllib.request.Request(
+            'https://api.openai.com/v1/responses',
+            data=request_data,
+            headers={
+                'Content-Type': 'application/json',
+                'Authorization': f'Bearer {api_key}'
+            }
+        )
+
+        with urllib.request.urlopen(req, timeout=60) as response:
+            result = json.loads(response.read().decode('utf-8'))
+
+        # Extract text from response - guaranteed valid JSON with structured outputs
+        for item in result.get('output', []):
+            if item.get('type') == 'message':
+                for content_item in item.get('content', []):
+                    if content_item.get('type') == 'output_text':
+                        text_content = content_item.get('text', '')
+                        parsed = json.loads(text_content)
+                        return parsed.get('similar', [])
+
+        return []
+
+    except Exception as e:
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: find_similar_entries error: {str(e)}\n")
+        return []
+
+
+def add_relationships_to_entry(project_folder, timestamp, related_entries):
+    """Add Related: metadata line to an existing kb.md entry."""
+    log_file = Path(__file__).parent / 'host.log'
+
+    try:
+        is_valid, result = validate_project_folder(project_folder)
+        if not is_valid:
+            return False
+
+        folder_path = result
+        kb_file = folder_path / 'kb.md'
+
+        if not kb_file.exists():
+            return False
+
+        with open(kb_file, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+
+        # Find entry with matching timestamp
+        i = 0
+        while i < len(lines):
+            if f'`{timestamp}`' in lines[i]:
+                # Find insertion point (after Notes, before Entity/Topics/etc)
+                j = i + 1
+                insert_pos = j
+
+                while j < len(lines):
+                    line = lines[j]
+                    if line.startswith('- `'):  # Next entry
+                        break
+                    if line.startswith('  - Notes:') or line.startswith('  - ParentId:'):
+                        insert_pos = j + 1
+                        # Skip multi-line notes
+                        while insert_pos < len(lines) and lines[insert_pos].startswith('    '):
+                            insert_pos += 1
+                    elif line.startswith('  - Entity:') or line.startswith('  - Topics:'):
+                        break
+                    j += 1
+
+                # Format related entries: timestamp (type), timestamp (type)
+                related_str = ', '.join([f"{r['timestamp']} ({r['type']})" for r in related_entries])
+                lines.insert(insert_pos, f"  - Related: {related_str}\n")
+
+                with open(kb_file, 'w', encoding='utf-8') as f:
+                    f.writelines(lines)
+
+                with open(log_file, 'a', encoding='utf-8') as f:
+                    f.write(f"{datetime.now()}: Added relationships to {timestamp}\n")
+                return True
+
+            i += 1
+
+        return False
+
+    except Exception as e:
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: add_relationships_to_entry error: {str(e)}\n")
+        return False
+
+
+def add_similar_to_entry(project_folder, timestamp, similar_entries):
+    """Add Similar: metadata line to an existing kb.md entry."""
+    log_file = Path(__file__).parent / 'host.log'
+
+    try:
+        is_valid, result = validate_project_folder(project_folder)
+        if not is_valid:
+            return False
+
+        folder_path = result
+        kb_file = folder_path / 'kb.md'
+
+        if not kb_file.exists():
+            return False
+
+        with open(kb_file, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+
+        # Find entry with matching timestamp
+        i = 0
+        while i < len(lines):
+            if f'`{timestamp}`' in lines[i]:
+                # Find insertion point (after Notes/Related, before Entity/Topics)
+                j = i + 1
+                insert_pos = j
+
+                while j < len(lines):
+                    line = lines[j]
+                    if line.startswith('- `'):  # Next entry
+                        break
+                    if line.startswith('  - Notes:') or line.startswith('  - ParentId:') or line.startswith('  - Related:'):
+                        insert_pos = j + 1
+                        # Skip multi-line notes
+                        while insert_pos < len(lines) and lines[insert_pos].startswith('    '):
+                            insert_pos += 1
+                    elif line.startswith('  - Entity:') or line.startswith('  - Topics:'):
+                        break
+                    j += 1
+
+                # Format similar entries: timestamp (score), timestamp (score)
+                similar_str = ', '.join([f"{s['timestamp']} ({s['score']})" for s in similar_entries])
+                lines.insert(insert_pos, f"  - Similar: {similar_str}\n")
+
+                with open(kb_file, 'w', encoding='utf-8') as f:
+                    f.writelines(lines)
+
+                with open(log_file, 'a', encoding='utf-8') as f:
+                    f.write(f"{datetime.now()}: Added similar entries to {timestamp}\n")
+                return True
+
+            i += 1
+
+        return False
+
+    except Exception as e:
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: add_similar_to_entry error: {str(e)}\n")
+        return False
+
+
 def background_process_entry(project_folder, timestamp, entry, api_key, file_path=None):
     """
     Background thread for AI processing pipeline.
 
     Runs after the initial save returns to the UI, performing:
-    1. Grammar correction on user notes
-    2. AI summary generation (type-specific)
-    3. Classification (entity, topics, people extraction)
-    4. Work/personal categorisation
+    1. AI summary generation (type-specific)
+    2. Classification (entity, topics, people, work/personal, grammar correction)
+    3. Relationship extraction (parse notes for references to other entries)
+    4. Content similarity (find semantically similar entries)
 
     Each step's results are written back to kb.md incrementally.
     Prompts are loaded from settings.json file.
@@ -1963,33 +2434,21 @@ def background_process_entry(project_folder, timestamp, entry, api_key, file_pat
         with open(log_file, 'a', encoding='utf-8') as f:
             f.write(f"{datetime.now()}: Background thread started for {timestamp}\n")
 
-        # Load custom prompts from settings.json
+        # Load prompts from settings.json (single source of truth)
         settings = load_settings()
-        classification_prompt = get_prompt(settings, 'classification_prompt', DEFAULT_CLASSIFICATION_PROMPT)
-        grammar_prompt = get_prompt(settings, 'grammar_prompt', DEFAULT_GRAMMAR_PROMPT)
-        work_personal_prompt = get_prompt(settings, 'work_personal_prompt', DEFAULT_WORK_PERSONAL_PROMPT)
+        classification_prompt = get_prompt(settings, 'classification_prompt')
 
         # Load all summary prompts
         summary_prompts = {
-            'image': get_prompt(settings, 'image_prompt', DEFAULT_IMAGE_PROMPT),
-            'audio': get_prompt(settings, 'audio_prompt', DEFAULT_AUDIO_PROMPT),
-            'document': get_prompt(settings, 'document_prompt', DEFAULT_DOCUMENT_PROMPT),
-            'link': get_prompt(settings, 'link_prompt', DEFAULT_LINK_PROMPT),
-            'text': get_prompt(settings, 'text_prompt', DEFAULT_TEXT_PROMPT),
-            'research': get_prompt(settings, 'research_prompt', DEFAULT_RESEARCH_PROMPT),
+            'image': get_prompt(settings, 'image_prompt'),
+            'audio': get_prompt(settings, 'audio_prompt'),
+            'document': get_prompt(settings, 'document_prompt'),
+            'link': get_prompt(settings, 'link_prompt'),
+            'text': get_prompt(settings, 'text_prompt'),
+            'research': get_prompt(settings, 'research_prompt'),
         }
 
-        notes = entry.get('notes', '').strip()
-
-        # STEP 1: Grammar fix (faster) - only fix notes, not selectedText
-        if notes and api_key:
-            fixed_notes = fix_grammar_openai(notes, entry, api_key, grammar_prompt)
-            if fixed_notes and fixed_notes != notes:
-                update_entry_notes(project_folder, timestamp, fixed_notes)
-                # Update entry dict for later steps to use corrected notes
-                entry['notes'] = fixed_notes
-
-        # STEP 2: AI Summary (before classification so summary can inform classification)
+        # STEP 1: AI Summary (before classification so summary can inform classification)
         summary = None
         if api_key:
             entry_type = entry.get('type', '')
@@ -1997,13 +2456,21 @@ def background_process_entry(project_folder, timestamp, entry, api_key, file_pat
             if summary:
                 add_summary_to_entry(project_folder, timestamp, summary)
 
-        # STEP 3: Classification (uses notes + summary for better context)
+        # STEP 2: Classification (includes grammar correction, entity, topics, people, work/personal)
+        classification = None
         if api_key:
             existing_topics = load_topics(project_folder)
             existing_entities = load_entities(project_folder)
             classification = classify_entry(entry, api_key, existing_topics, existing_entities, summary, classification_prompt)
 
             if classification:
+                # Apply grammar-corrected notes
+                corrected_notes = classification.get('corrected_notes', '').strip()
+                original_notes = entry.get('notes', '').strip()
+                if corrected_notes and corrected_notes != original_notes:
+                    update_entry_notes(project_folder, timestamp, corrected_notes)
+                    entry['notes'] = corrected_notes
+
                 # Save topics/entities to JSON files
                 new_topics = classification.get('topics', [])
                 new_entities = classification.get('people', [])
@@ -2016,11 +2483,83 @@ def background_process_entry(project_folder, timestamp, entry, api_key, file_pat
                 # Add classification metadata to kb.md entry
                 add_classification_to_entry(project_folder, timestamp, classification)
 
-        # STEP 4: Work/Personal classification (uses all context from previous steps)
-        if api_key:
-            category = classify_work_personal(entry, api_key, classification, summary, work_personal_prompt)
-            if category:
-                add_category_to_entry(project_folder, timestamp, category)
+                # Add work/personal category
+                category = classification.get('category')
+                if category:
+                    add_category_to_entry(project_folder, timestamp, category)
+
+        # STEP 3: Relationship extraction (parse notes for references to other entries)
+        relationship_extraction_prompt = get_prompt(settings, 'relationship_extraction_prompt')
+        relationship_resolution_prompt = get_prompt(settings, 'relationship_resolution_prompt')
+
+        notes = entry.get('notes', '').strip()
+        if notes and len(notes) >= 10 and api_key:
+            # Update entry with classification info for extraction
+            entry['topics'] = classification.get('topics', []) if classification else []
+
+            relationships = extract_relationships(entry, api_key, relationship_extraction_prompt)
+            if relationships.get('has_relationships') and relationships.get('references'):
+                # Load all entries for candidate search
+                all_entries = load_all_entries(project_folder)
+
+                resolved_relationships = []
+                for ref in relationships['references']:
+                    # Find candidates using fuzzy search
+                    candidates = fuzzy_search_candidates(
+                        all_entries,
+                        ref.get('target', ''),
+                        ref.get('type', 'any'),
+                        ref.get('temporal', 'none'),
+                        timestamp
+                    )
+
+                    if candidates:
+                        # Use AI to pick the best match
+                        resolution = resolve_with_ai(
+                            ref.get('phrase', ''),
+                            ref.get('target', ''),
+                            candidates,
+                            api_key,
+                            relationship_resolution_prompt
+                        )
+
+                        if resolution.get('timestamp') and resolution.get('confidence') in ['high', 'medium']:
+                            resolved_relationships.append({
+                                'timestamp': resolution['timestamp'],
+                                'type': 'mentions'
+                            })
+
+                if resolved_relationships:
+                    add_relationships_to_entry(project_folder, timestamp, resolved_relationships)
+
+        # STEP 4: Content similarity (find semantically similar entries)
+        content_similarity_prompt = get_prompt(settings, 'content_similarity_prompt')
+
+        # Check if entry has meaningful content for comparison
+        has_content = (
+            entry.get('notes', '').strip() or
+            entry.get('selectedText', '').strip() or
+            summary
+        )
+
+        if has_content and api_key:
+            # Update entry with all available context
+            entry['aiSummary'] = summary or ''
+            entry['topics'] = classification.get('topics', []) if classification else []
+            entry['entity'] = classification.get('entity', '') if classification else ''
+            entry['people'] = classification.get('people', []) if classification else []
+
+            # Load all entries if not already loaded
+            if 'all_entries' not in locals():
+                all_entries = load_all_entries(project_folder)
+
+            # Get pre-filtered candidates
+            similarity_candidates = get_similarity_candidates(all_entries, entry)
+
+            if similarity_candidates:
+                similar = find_similar_entries(entry, similarity_candidates, api_key, content_similarity_prompt)
+                if similar:
+                    add_similar_to_entry(project_folder, timestamp, similar)
 
         with open(log_file, 'a', encoding='utf-8') as f:
             f.write(f"{datetime.now()}: Background thread completed for {timestamp}\n")
@@ -2274,52 +2813,145 @@ def classify_and_update_entry(project_folder, timestamp, entry, api_key):
 
 
 def launch_widget():
-    """Launch the desktop widget in a separate process."""
+    """Launch widget with single-instance check."""
     import subprocess
+    import tempfile
+
+    log_file = Path(__file__).parent / 'host.log'
+
+    def log(msg):
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(f"{datetime.now()}: [launch_widget] {msg}\n")
+
+    log("=" * 50)
+    log("launch_widget() called")
+
     widget_path = Path(__file__).parent / 'widget.pyw'
+    state_file = Path(__file__).parent / 'widget_state.json'
+    lock_file = Path(tempfile.gettempdir()) / 'ultrathink_widget.lock'
+
+    log(f"widget_path: {widget_path}")
+    log(f"widget_path.exists(): {widget_path.exists()}")
 
     if not widget_path.exists():
+        log("ERROR: Widget not found!")
         return {'success': False, 'error': 'Widget not found'}
 
+    # Check state file for running widget
+    log(f"Checking state file: {state_file}")
+    log(f"state_file.exists(): {state_file.exists()}")
+    try:
+        if state_file.exists():
+            with open(state_file, 'r') as f:
+                state = json.load(f)
+            log(f"State file contents: {state}")
+            if state.get('running') and state.get('pid'):
+                log(f"State says running with PID {state['pid']} - checking...")
+                result = subprocess.run(
+                    ['tasklist', '/FI', f'PID eq {state["pid"]}', '/NH'],
+                    capture_output=True, text=True
+                )
+                log(f"tasklist result: {result.stdout.strip()}")
+                if 'pythonw.exe' in result.stdout or 'python.exe' in result.stdout:
+                    log("Process IS running - trying to focus window")
+                    # Focus existing window
+                    try:
+                        import ctypes
+                        hwnd = ctypes.windll.user32.FindWindowW(None, "UltraThink Widget")
+                        log(f"FindWindowW returned: {hwnd}")
+                        if hwnd:
+                            ctypes.windll.user32.SetForegroundWindow(hwnd)
+                            log("Focused existing window")
+                    except Exception as e:
+                        log(f"Focus error: {e}")
+                    return {'success': True, 'already_running': True}
+                else:
+                    log("Process NOT running - state is stale")
+    except Exception as e:
+        log(f"State check error: {e}")
+
+    # Clean stale lock file
+    log(f"Cleaning stale lock file: {lock_file}")
+    try:
+        lock_file.unlink(missing_ok=True)
+        log("Lock file cleaned")
+    except Exception as e:
+        log(f"Lock cleanup error: {e}")
+
+    log("Launching widget process...")
     try:
         # Launch with pythonw (no console window)
-        subprocess.Popen(
+        process = subprocess.Popen(
             ['pythonw', str(widget_path)],
             creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
             close_fds=True
         )
-        return {'success': True}
+        log(f"SUCCESS: Widget launched with PID {process.pid}")
+        return {'success': True, 'pid': process.pid}
     except FileNotFoundError:
+        log("pythonw not found - trying python instead")
         # Try with python if pythonw not found
         try:
-            subprocess.Popen(
+            process = subprocess.Popen(
                 ['python', str(widget_path)],
                 creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
                 close_fds=True
             )
-            return {'success': True}
+            log(f"SUCCESS: Widget launched with python, PID {process.pid}")
+            return {'success': True, 'pid': process.pid}
         except Exception as e:
+            log(f"ERROR: Failed to launch with python: {e}")
             return {'success': False, 'error': f'Failed to launch: {str(e)}'}
     except Exception as e:
+        log(f"ERROR: Launch failed: {e}")
         return {'success': False, 'error': str(e)}
 
 
 def close_widget():
-    """Close the desktop widget by finding and terminating the process."""
+    """Close widget by PID from state file."""
     import subprocess
+    import tempfile
+
+    state_file = Path(__file__).parent / 'widget_state.json'
+    lock_file = Path(tempfile.gettempdir()) / 'ultrathink_widget.lock'
+    pid = None
+
+    # Get PID from state file
     try:
-        # Find and kill pythonw processes running widget.pyw
-        result = subprocess.run(
-            ['taskkill', '/F', '/IM', 'pythonw.exe', '/FI', 'WINDOWTITLE eq UltraThink*'],
-            capture_output=True,
-            text=True
-        )
-        # Also try killing by window title using powershell
-        subprocess.run(
-            ['powershell', '-Command',
-             "Get-Process | Where-Object {$_.MainWindowTitle -like '*UltraThink*'} | Stop-Process -Force"],
-            capture_output=True
-        )
+        if state_file.exists():
+            with open(state_file, 'r') as f:
+                pid = json.load(f).get('pid')
+    except Exception:
+        pass
+
+    try:
+        kill_succeeded = False
+        if pid:
+            # Kill by specific PID - precise and safe
+            result = subprocess.run(['taskkill', '/F', '/PID', str(pid)], capture_output=True)
+            kill_succeeded = result.returncode == 0
+        else:
+            # Fallback: exact window title match (more targeted than wildcard)
+            result = subprocess.run([
+                'powershell', '-Command',
+                "Get-Process | Where-Object {$_.MainWindowTitle -eq 'UltraThink Widget'} | Stop-Process -Force"
+            ], capture_output=True)
+            # PowerShell returns 0 even if no process found, so consider it success
+            kill_succeeded = result.returncode == 0
+
+        # Cleanup state file (always do this, even if kill "failed" - widget may have already exited)
+        try:
+            with open(state_file, 'w') as f:
+                json.dump({'running': False, 'pid': None}, f)
+        except Exception:
+            pass
+
+        # Cleanup lock file
+        try:
+            lock_file.unlink(missing_ok=True)
+        except Exception:
+            pass
+
         return {'success': True}
     except Exception as e:
         return {'success': False, 'error': str(e)}

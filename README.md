@@ -389,7 +389,271 @@ Each entry in `kb.md` looks like this:
 
 ## Version History
 
-- **v3.1.0** (Current) - Visualise 2: Multi-View Visualization
+- **v3.3.16** (Current) - Add browser console logging for AI pipeline
+  - New AI logger module in background.js for consistent logging
+  - Logs entry details, metadata extraction, and AI pipeline steps
+  - Shows expected AI processing (summary type, classification, relationships)
+  - Timestamps correlate with host.log for debugging
+
+- **v3.3.15** - Move dark mode toggle to header
+  - Dark mode icon now in top-right of header
+  - Version number moved to sit right of "Ultrathink" text
+
+- **v3.3.14** - Add model/web info to settings prompts UI
+  - Each prompt textarea now shows: model name, web search status, applicable entry types
+
+- **v3.3.13** - Enable web search for text summaries
+  - `summarize_text` now uses `gpt-5` with web search (was `gpt-5-nano` without web)
+  - Applies to snippet, paragraph, claude, chatgpt, perplexity, notion, long-note types
+  - Increased timeout to 90s to allow for web search
+
+- **v3.3.12** - Fix page navigation bug
+  - Added missing `.classList.remove('active')` for settingsPage and visualise2Page
+  - Fixes old page content bleeding through when navigating between pages
+
+- **v3.3.11** - Merge grammar correction into classification call
+  - Grammar correction now done in same API call as classification (saves 1 API call per entry)
+  - Removed separate `fix_grammar_openai()` function and `grammar_prompt`
+  - Classification prompt now includes grammar correction and returns `corrected_notes`
+
+- **v3.3.10** - Topics/People list width
+  - Management list now max-width 50% instead of full width
+
+- **v3.3.9** - Topics/People pages UI improvements
+  - Moved "Add new" input to top of page, shorter width, no indent
+  - Fixed dark mode: all hardcoded colors now use CSS variables
+
+- **v3.3.8** - Settings dark mode fix, remove work/personal prompt UI
+  - Fixed settings panel white background in dark mode (now uses CSS variables)
+  - Removed Work/Personal classification prompt textarea (merged into classification prompt)
+
+- **v3.3.7** - Fix row hover in dark mode
+  - Override Tabulator's cell hover background to transparent
+  - Prevents bright white hover on grid rows
+
+- **v3.3.6** - Fix type badge text color for readability
+  - Changed type badge text from white to dark gray (#1f2937) for better contrast on pastel backgrounds
+
+- **v3.3.5** - Merge work/personal classification into main classification call
+  - Combined work/personal classification with entity/topics/people classification in single API call
+  - Reduces API calls by 1 per entry, saves tokens and improves processing speed
+  - Removed separate `classify_work_personal()` function and `work_personal_prompt`
+
+- **v3.3.4** - Fix duplicate entries in filter dropdowns
+  - `populateFilters()` now clears existing options before adding new ones
+  - Prevents duplicates accumulating on each data refresh
+
+- **v3.3.3** - Fix dark mode grid header
+  - Grid header now uses `var(--bg-surface)` instead of hardcoded white
+
+- **v3.3.2** - Fix grid column reset on any refresh
+  - `loadEntries()` now uses `replaceData()` instead of recreating table, preserving column visibility
+  - Fixes column reset on delete, command palette refresh, and any other data reload
+
+- **v3.3.1** - Fix AI processing bugs, use structured outputs
+  - Fixed KeyError bugs in grammar fix, classification, and relationship extraction
+  - Converted all AI functions to use OpenAI Structured Outputs for guaranteed valid JSON
+  - Removed JSON examples from prompts (schema now defines output format)
+  - Grid columns now preserve their visibility when deleting items
+
+- **v3.3.0** - Entity relationships, auto-save on blur
+  - Parent/child relationships for sub-notes in long note mode
+  - AI-powered relationship extraction from notes (parses references like "related to project X")
+  - AI-powered content similarity detection between entries
+  - New Related section in detail panel showing parent, children, mentions, and similar entries
+  - Widget session tracking for sub-note capture with visual indicator
+  - Three new configurable AI prompts for relationship processing
+  - **Popup auto-save on focus loss**: Clicking away from popup now immediately saves instead of losing data
+
+- **v3.2.25** - Fix refresh button preserving column visibility
+  - Refresh button on Projects, Tasks, Knowledge grids now maintains current column configuration
+  - Added `skipColumnReset` parameter to `navigateToPage()` function
+  - Previously, refresh would reset columns to page-specific defaults, losing user customizations
+
+- **v3.2.24** - Fix slideover delete button not working
+  - Removed dead code referencing non-existent detailOpenUrl/detailCopyUrl buttons
+  - This was causing JS error that prevented delete button onclick from being assigned
+
+- **v3.2.23** - Harden all kb.md update functions
+  - Added `if status:` checks to `update_entry_status()` for consistency
+  - Comprehensive audit confirmed: kb.md is only source of truth
+  - All update functions now handle empty values safely
+
+- **v3.2.22** - Fix data loss bug in due date updates
+  - Fixed critical bug in `update_entry_duedate()` that lost entry metadata (Notes, Topics, People, etc.)
+  - Root cause: buffer not flushed when due_date was empty string
+  - Reduced comment "+" button from 12x12 to 6x6
+
+- **v3.2.21** - Fix delete modal callback bug
+  - Fixed delete modal showing but not actually deleting (callback was being nulled before execution)
+  - Fixes both toolbar delete and slideover delete button
+
+- **v3.2.20** - Fix delete confirmation modal
+  - Added missing CSS variables for danger colors (light and dark mode)
+  - Toolbar "delete selected" now uses styled modal instead of browser confirm
+  - Modal shows entry title for single delete, count for multi-delete
+
+- **v3.2.19** - Nice confirmation modal for delete
+  - Replaced browser confirm dialog with styled modal for delete confirmation
+  - Shows entry title in confirmation message
+  - Modal supports Escape key to cancel
+  - Both slideover delete button and inline delete button now use modal
+
+- **v3.2.18** - Refresh button now honors current grid view
+  - Fixed refresh button showing all entries instead of respecting filtered view (projects/tasks/knowledge)
+
+- **v3.2.17** - Bug fixes for task data persistence
+  - Fixed task data loss when moving on kanban board (lines after Status were lost)
+  - Fixed due dates not saving to kb.md (same data loss bug)
+  - Fixed comments not saving (simplified add_entry_comment logic)
+  - Moved "hide completed" button next to delete button in toolbar
+  - Fixed notes text color to black (was warning color)
+  - Made comment add button icon smaller (12px)
+  - Added proper error handling for comment add failures
+
+- **v3.2.16** - UI polish and comment bug fix
+  - Fixed comment add button not working (added missing showToast function)
+  - Kanban color bar doubled in height (8px)
+  - Removed topics from kanban cards
+  - Kanban dates consolidated: "Added x and due y" on single line
+  - Add column button moved inline with columns (far right, no gap)
+  - Work/personal badge: #ff5200 outline only, no background, black text
+  - MY NOTES title now black (not warning color)
+  - Status and Due on same line in detail panel, renamed "Due by" to "Due"
+  - Removed "No comments yet" placeholder text
+  - Comment add button: orange circle with white + icon, bottom right of textarea
+  - Added toast notification system for user feedback
+
+- **v3.2.15** - Tasks entity and grid improvements
+  - Fixed critical bug where tasks disappeared when moved on kanban board
+  - Added due date picker for tasks (stored in kb.md)
+  - Added timestamped comments section for tasks
+  - Snippet box now yellow like notes section
+  - Entity badge hidden on project/task/knowledge pages (shown only on "all")
+  - Entity and work/personal badges inline with "Captured by" text
+  - Status now clickable text with dropdown (not select element)
+  - Tasks grid: hidden topics/people columns, added due date column
+  - Kanban cards show due date (with overdue highlighting)
+  - Removed "Task Board" text from kanban
+  - Kanban title edit field auto-sizes to content
+  - Kanban columns: uniform colors, thinner color bar, click header for color picker
+  - More pastel color options with hex code input
+
+- **v3.2.14** - Long notes AI processing on exit only
+  - AI analysis (grammar, summary, classification) now runs when exiting expanded mode
+  - Previously ran on first save, now waits until user finishes the note
+
+- **v3.2.13** - Image analysis web search
+  - Added web search capability to image summaries (like link/research summaries)
+  - Updated image prompt to mention web search availability
+  - Increased image analysis timeout from 60s to 120s
+
+- **v3.2.12** - Fixed screenshot drag selection
+  - Added `pointer-events: none` to selection box so mouseup events reach overlay
+  - Single click (< 5px) triggers full screen, drag captures region
+  - Removed 2-second auto-capture timeout
+
+- **v3.2.8** - Moved type badge to bottom tags bar
+  - Type badge (link, screenshot, etc.) now appears first in bottom status bar
+  - Alongside topics and people tags for cleaner header area
+
+- **v3.2.7** - AI Summary display improvements
+  - Removed "Summary:" prefix from brief summaries
+  - Changed headers to lowercase: "Detailed analysis", "Key points", "Paragraph summary"
+  - Made Key points collapsible like other sections
+  - Combined context and sources into "Content and sources" collapsible
+  - Sources now displayed as bulleted list, not comma-separated
+  - Strip OpenAI citation artifacts (citeturn...) from all text
+  - Reduced paragraph spacing in detailed sections
+
+- **v3.2.6** - Widget minimal mode
+  - Added shrink button to widget header (arrows-in icon)
+  - Minimal mode: compact view with 40% transparent background
+  - Shows only drop zone (single row), notes, and 4 action buttons
+  - Double-click to restore to standard view
+  - Replaced monitor icon with cleaner desktop icon
+
+- **v3.2.5** - Widget code review fixes
+  - Fixed duplicate cleanup handlers in widget.pyw (removed atexit, kept aboutToQuit)
+  - Fixed close_widget() in host.py to check taskkill return code before reporting success
+  - Added 5-second timeout to popup.js debounce to prevent button lockup on hang
+
+- **v3.2.4** - Wider delete column
+  - Increased actions column width from 50px to 60px to prevent text overflow
+
+- **v3.2.3** - Hidden row handle/collapse toggle via CSS
+  - Force hidden Tabulator responsive collapse and row handle elements
+
+- **v3.2.2** - Settings UI prompt sync
+  - Synced all prompt defaults in Settings page with host.py (v3.2.0 changes)
+  - Added work/personal classification prompt to Settings UI
+  - Updated placeholder documentation for image/text prompts
+  - Removed responsive collapse button from grid
+
+- **v3.2.1** - Fixed search box focus outline
+  - Removed orange outline on search box input focus (has its own focus styling)
+
+- **v3.2.0** - AI Structured Outputs
+  - All AI prompts updated with improved instructions and {notes} placeholders
+  - summarize_audio: structured output (summary, speakers, transcript)
+  - summarize_document: multi-level summaries (brief, paragraph, detailed) with entities
+  - summarize_link: structured output with key points, context, and sources
+  - summarize_text: now uses both selectedText AND notes
+  - summarize_with_research: improved formatting with line breaks
+  - Frontend updated to parse and display structured JSON summaries
+
+- **v3.1.12** - Fixed widget single-instance check
+  - Changed `is_widget_running()` to check for UltraThink window instead of just any Python process
+  - Automatically cleans up stale lock files when widget window not found
+
+- **v3.1.11** - Consolidated document summarization
+  - All document types now use proper text extraction libraries
+  - PDF: PyPDF2, Word: python-docx, Excel: openpyxl, PowerPoint: python-pptx
+  - All use gpt-5-nano (fast, cheap) with no web search
+  - Consistent 30s timeout across all document types
+
+- **v3.1.10** - Moved delete button next to category toggle
+  - Delete button now positioned right of All/Work/Personal toggle for better UX
+
+- **v3.1.9** - Widget crash fix with single-instance protection
+  - Fixed Edge crash when rapidly clicking widget button
+  - Added lock file with PID tracking in widget.pyw
+  - Added state file coordination between host.py and widget
+  - Replaced wildcard taskkill with PID-based process termination
+  - Added debouncing to popup.js button handler
+
+- **v3.1.8** - Moved dark mode toggle to toolbar
+  - Dark mode button now next to refresh and delete buttons in toolbar
+
+- **v3.1.7** - Detail panel spacing fix
+  - Removed white gap between AI Summary and Topics sections in slide-out panel
+
+- **v3.1.6** - Structured Outputs for classification
+  - Entity/topics/people classification now uses OpenAI Structured Outputs for guaranteed valid JSON
+  - Fixes classification failures on screenshots, audio, and notes
+
+- **v3.1.5** - Widget screenshot area fix
+  - Fixed screen capture selecting wrong area on multi-monitor/high-DPI setups
+  - Now uses mss monitor info to get accurate physical screen coordinates
+
+- **v3.1.4** - PDF summarization and link speed improvements
+  - Fixed PDF summarization: Now extracts text locally (PyPDF2/pdfplumber) then sends to GPT-5 with web search
+  - Removed reasoning from link summary for faster response times
+  - PDF summary uses 120s timeout with web search capability
+
+- **v3.1.3** - UK spelling for Organise nav label
+  - Changed "Organize" to "Organise" in navigation section label
+
+- **v3.1.2** - Detail panel meta improvements
+  - Changed meta line to read "Captured by [source] at [date], [time]"
+  - Reduced gap between title and meta info
+
+- **v3.1.1** - Detail panel header cleanup
+  - Removed grey type badge from detail panel header
+  - Moved delete and close buttons inline with title for cleaner layout
+  - Removed redundant header section
+
+- **v3.1.0** - Visualise 2: Multi-View Visualization
   - New "Visualise 2" page with four view modes:
     - Network: Force-directed graph (vis.js) showing entries, topics, and people
     - Topics: D3.js circle pack showing topic popularity with entity-colored bubbles

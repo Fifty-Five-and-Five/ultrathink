@@ -40,6 +40,9 @@ let autoSaveTriggered = false;
 let screenshotData = null;
 let allTabs = [];
 
+// Widget action debouncing
+let widgetActionInProgress = false;
+
 /**
  * Detects the content type based on URL patterns.
  * Identifies AI tools (Claude, ChatGPT, Perplexity), documents, and media.
@@ -200,28 +203,53 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Setup pin button handler (toggle pinned dialog on page)
   document.getElementById('pinBtn').addEventListener('click', async () => {
+    // Debounce protection - prevent rapid clicks
+    if (widgetActionInProgress) {
+      pinLog.debug('Widget action in progress, ignoring click');
+      return;
+    }
+    widgetActionInProgress = true;
+
+    // Safety timeout - reset flag after 5 seconds if operation hangs
+    const debounceTimeout = setTimeout(() => {
+      pinLog.debug('Widget action timed out, resetting flag');
+      widgetActionInProgress = false;
+      const btn = document.getElementById('pinBtn');
+      if (btn) {
+        btn.disabled = false;
+        btn.style.opacity = '1';
+      }
+    }, 5000);
+
     // Stop auto-save timer immediately
     clearInterval(timerInterval);
 
     const pinBtn = document.getElementById('pinBtn');
-    const isPinned = pinBtn.classList.contains('pinned');
+    pinBtn.disabled = true;
+    pinBtn.style.opacity = '0.5';
 
+    const isPinned = pinBtn.classList.contains('pinned');
     pinLog.debug('Button clicked, currently pinned:', isPinned);
 
     try {
       if (isPinned) {
         // Close desktop widget
-        chrome.runtime.sendMessage({ action: 'closeWidget' });
+        await chrome.runtime.sendMessage({ action: 'closeWidget' });
         pinBtn.classList.remove('pinned');
       } else {
         // Launch desktop widget
-        chrome.runtime.sendMessage({ action: 'launchWidget' });
+        await chrome.runtime.sendMessage({ action: 'launchWidget' });
         pinBtn.classList.add('pinned');
       }
 
-      window.close();
+      clearTimeout(debounceTimeout);
+      setTimeout(() => window.close(), 100);
     } catch (error) {
+      clearTimeout(debounceTimeout);
       pinLog.error('Error toggling widget:', error);
+      pinBtn.disabled = false;
+      pinBtn.style.opacity = '1';
+      widgetActionInProgress = false;
     }
   });
 
@@ -240,6 +268,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     } else {
       el.addEventListener('input', resetTimer);
       el.addEventListener('focus', resetTimer);
+    }
+  });
+
+  // Save immediately when popup loses focus (user clicks away)
+  window.addEventListener('blur', () => {
+    if (!autoSaveTriggered) {
+      autoSaveTriggered = true;
+      clearInterval(timerInterval);
+      const timerEl = document.getElementById('timer');
+      timerEl.textContent = 'Saving...';
+      saveEntry();
     }
   });
 });

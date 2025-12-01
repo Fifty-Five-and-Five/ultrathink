@@ -57,6 +57,9 @@
             --color-info: #3b82f6;
             --color-info-bg: #e0f2fe;
             --color-info-text: #0369a1;
+            --color-danger: #dc2626;
+            --color-danger-hover: #b91c1c;
+            --color-danger-subtle: #fee2e2;
 
             /* Tag Colors */
             --tag-topic-bg: #e0f2fe;
@@ -145,7 +148,7 @@
             --bg-surface: #1a1a1a;
             --bg-surface-secondary: #242424;
             --bg-surface-tertiary: #2a2a2a;
-            --bg-hover: rgba(255, 255, 255, 0.06);
+            --bg-hover: #2a2a2a;
             --bg-pressed: rgba(255, 255, 255, 0.08);
             --bg-selected: rgba(255, 255, 255, 0.08);
 
@@ -171,6 +174,9 @@
             --color-warning-text: #fbbf24;
             --color-info-bg: rgba(59, 130, 246, 0.15);
             --color-info-text: #60a5fa;
+            --color-danger: #ef4444;
+            --color-danger-hover: #dc2626;
+            --color-danger-subtle: rgba(239, 68, 68, 0.15);
 
             --tag-topic-bg: rgba(14, 165, 233, 0.2);
             --tag-topic-text: #38bdf8;
@@ -249,39 +255,22 @@
         }
 
         /* Theme Toggle Button */
-        .theme-toggle {
-            background: none;
-            border: none;
-            cursor: pointer;
-            padding: var(--space-2);
-            border-radius: var(--radius-md);
-            color: var(--text-tertiary);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: background var(--transition-fast), color var(--transition-fast);
-        }
-
-        .theme-toggle:hover {
-            background: var(--bg-hover);
-            color: var(--text-primary);
-        }
-
-        .theme-toggle svg {
-            width: 20px;
-            height: 20px;
-        }
-
-        .theme-toggle .theme-icon-dark {
+        #themeToggleBtn .theme-icon-dark {
             display: none;
         }
 
-        [data-theme="dark"] .theme-toggle .theme-icon-light {
+        [data-theme="dark"] #themeToggleBtn .theme-icon-light {
             display: none;
         }
 
-        [data-theme="dark"] .theme-toggle .theme-icon-dark {
+        [data-theme="dark"] #themeToggleBtn .theme-icon-dark {
             display: block;
+        }
+
+        .viewer-version {
+            font-size: 11px;
+            color: var(--text-tertiary);
+            margin-left: var(--space-2);
         }
 
         .sidebar-toggle-btn {
@@ -742,7 +731,7 @@
         }
 
         .tabulator .tabulator-header {
-            background: white !important;
+            background: var(--bg-surface) !important;
             border-bottom: 1px solid var(--border-default) !important;
         }
 
@@ -837,6 +826,10 @@
             background: var(--bg-hover) !important;
         }
 
+        .tabulator .tabulator-row:hover .tabulator-cell {
+            background: inherit !important;
+        }
+
         /* Row hover accent bar */
         .tabulator .tabulator-row::before {
             content: '';
@@ -878,8 +871,9 @@
             text-decoration: line-through;
         }
 
-        .tabulator .tabulator-row .tabulator-responsive-collapse {
-            border: none !important;
+        .tabulator .tabulator-row .tabulator-responsive-collapse,
+        .tabulator .tabulator-row .tabulator-row-handle {
+            display: none !important;
         }
 
         /* Row selection checkbox column */
@@ -897,10 +891,41 @@
         .type-badge {
             display: inline-block;
             padding: 2px 8px;
-            border-radius: var(--radius-sm);
+            margin: 1px 2px;
+            border-radius: var(--radius-full);
             font-size: var(--text-xs);
             font-weight: var(--font-medium);
             color: #1f2937;
+        }
+
+        /* Category badge (work/personal) - outline style */
+        .category-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            margin: 1px 2px;
+            border-radius: var(--radius-full);
+            font-size: var(--text-xs);
+            font-weight: var(--font-medium);
+            background: transparent;
+            border: 1px solid #ff5200;
+            color: var(--text-primary);
+        }
+
+        /* Due date badge */
+        .due-date-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            margin: 1px 2px;
+            border-radius: var(--radius-full);
+            font-size: var(--text-xs);
+            font-weight: var(--font-medium);
+            background: var(--bg-surface-secondary);
+            color: var(--text-secondary);
+        }
+
+        .due-date-badge.overdue {
+            background: #fecaca;
+            color: #dc2626;
         }
 
         /* Source text */
@@ -926,11 +951,12 @@
             color: var(--text-secondary);
         }
 
-        /* Entity badge */
+        /* Entity badge (knowledge/project/task) - pill style like topic/person tags */
         .entity-badge {
             display: inline-block;
             padding: 2px 8px;
-            border-radius: var(--radius-sm);
+            margin: 1px 2px;
+            border-radius: var(--radius-full);
             font-size: var(--text-xs);
             font-weight: var(--font-medium);
             color: #1f2937;
@@ -1036,15 +1062,6 @@
             transform: translateX(0);
         }
 
-        .detail-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: var(--space-4) var(--space-5);
-            border-bottom: 1px solid var(--border-default);
-            flex-shrink: 0;
-        }
-
         .detail-close {
             background: none;
             border: none;
@@ -1068,32 +1085,25 @@
             height: 20px;
         }
 
-        .detail-header-actions {
-            display: flex;
-            align-items: center;
-            gap: var(--space-1);
-        }
-
-        .detail-header-actions .btn-icon {
-            padding: var(--space-2);
-        }
-
-        .detail-header-actions .btn-icon svg {
-            width: 18px;
-            height: 18px;
-        }
-
         .detail-body {
             flex: 1;
             overflow-y: auto;
             padding: var(--space-5);
         }
 
+        .detail-title-row {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: var(--space-3);
+            margin-bottom: var(--space-2);
+        }
+
         .detail-title {
+            flex: 1;
             font-size: var(--text-xl);
             font-weight: var(--font-semibold);
             color: var(--text-primary);
-            margin-bottom: var(--space-4);
             line-height: var(--leading-tight);
         }
 
@@ -1106,11 +1116,24 @@
             text-decoration: underline;
         }
 
-        .detail-meta {
+        .detail-title-actions {
             display: flex;
-            flex-wrap: wrap;
+            align-items: center;
+            gap: var(--space-1);
+            flex-shrink: 0;
+        }
+
+        .detail-meta-row {
+            display: flex;
+            align-items: center;
             gap: var(--space-2);
-            margin-bottom: var(--space-5);
+            flex-wrap: wrap;
+            margin-bottom: var(--space-3);
+        }
+
+        .detail-meta-text {
+            font-size: var(--text-sm);
+            color: var(--text-tertiary);
         }
 
         .detail-section {
@@ -1124,14 +1147,20 @@
             padding-top: 0;
         }
 
-        /* Task status section in detail panel */
-        .detail-status-section {
+        /* Task status and due section in detail panel - same line */
+        .detail-status-due-section {
             display: flex;
             align-items: center;
-            gap: var(--space-3);
+            gap: var(--space-6);
             padding: var(--space-3) 0;
             border-top: none;
             margin-bottom: var(--space-3);
+        }
+
+        .status-due-item {
+            display: flex;
+            align-items: center;
+            gap: var(--space-3);
         }
 
         .detail-label {
@@ -1161,6 +1190,201 @@
             box-shadow: 0 0 0 2px var(--color-primary-alpha);
         }
 
+        /* Status dropdown (text-based) */
+        .status-dropdown-wrapper {
+            position: relative;
+        }
+
+        .status-display {
+            padding: var(--space-2) var(--space-3);
+            border: 1px solid var(--border-default);
+            border-radius: var(--radius-md);
+            background: var(--bg-surface);
+            font-size: var(--text-sm);
+            color: var(--text-primary);
+            cursor: pointer;
+            display: inline-block;
+            min-width: 120px;
+        }
+
+        .status-display:hover {
+            border-color: var(--border-strong);
+        }
+
+        .status-dropdown {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            margin-top: 4px;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-default);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-lg);
+            min-width: 140px;
+            z-index: 100;
+        }
+
+        .status-dropdown.hidden {
+            display: none;
+        }
+
+        .status-option {
+            padding: var(--space-2) var(--space-3);
+            cursor: pointer;
+            font-size: var(--text-sm);
+        }
+
+        .status-option:hover {
+            background: var(--bg-surface-secondary);
+        }
+
+        .status-option.selected {
+            background: var(--color-primary-alpha);
+            color: var(--color-primary);
+        }
+
+        /* Due date picker styles */
+        .duedate-wrapper {
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+            position: relative;
+        }
+
+        .duedate-display {
+            padding: var(--space-2) var(--space-3);
+            border: 1px solid var(--border-default);
+            border-radius: var(--radius-md);
+            background: var(--bg-surface);
+            font-size: var(--text-sm);
+            color: var(--text-primary);
+            cursor: pointer;
+        }
+
+        .duedate-display:hover {
+            border-color: var(--border-strong);
+        }
+
+        .duedate-picker {
+            padding: var(--space-2) var(--space-3);
+            border: 1px solid var(--border-default);
+            border-radius: var(--radius-md);
+            background: var(--bg-surface);
+            font-size: var(--text-sm);
+            color: var(--text-primary);
+        }
+
+        .duedate-remove {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 18px;
+            padding: 0 4px;
+            line-height: 1;
+        }
+
+        .duedate-remove:hover {
+            color: var(--color-danger);
+        }
+
+        .duedate-placeholder {
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+            padding: var(--space-2) var(--space-3);
+            border: 1px dashed var(--border-default);
+            border-radius: var(--radius-md);
+            background: var(--bg-surface);
+            font-size: var(--text-sm);
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .duedate-placeholder:hover {
+            border-color: var(--border-strong);
+            color: var(--text-secondary);
+            background: var(--bg-subtle);
+        }
+
+        .duedate-picker-hidden {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+            width: 0;
+            height: 0;
+        }
+
+        /* Comments section */
+        .detail-comments-section h4 {
+            font-size: var(--text-sm);
+            font-weight: var(--font-semibold);
+            color: var(--text-secondary);
+            margin-bottom: var(--space-3);
+        }
+
+        .comments-list {
+            margin-bottom: var(--space-3);
+        }
+
+        .comment-item {
+            padding: var(--space-2) 0;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .comment-timestamp {
+            font-size: var(--text-xs);
+            color: var(--text-muted);
+            display: block;
+            margin-bottom: 2px;
+        }
+
+        .comment-text {
+            font-size: var(--text-sm);
+            color: var(--text-primary);
+        }
+
+        .comment-add {
+            display: flex;
+            position: relative;
+        }
+
+        .comment-input {
+            flex: 1;
+            padding: var(--space-2) var(--space-3);
+            padding-right: 48px;
+            border: 1px solid var(--border-default);
+            border-radius: var(--radius-md);
+            background: var(--bg-surface);
+            font-size: var(--text-sm);
+            font-family: inherit;
+            resize: vertical;
+            min-height: 60px;
+        }
+
+        .comment-add-btn {
+            position: absolute;
+            bottom: 8px;
+            right: 8px;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: #ff5200;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            transition: transform 0.15s, background 0.15s;
+        }
+
+        .comment-add-btn:hover {
+            background: #e64a00;
+            transform: scale(1.1);
+        }
+
         .detail-section-header {
             display: flex;
             align-items: center;
@@ -1184,13 +1408,16 @@
             border-top: 1px solid var(--color-warning);
         }
 
-        .detail-notes-section .detail-section-title {
-            color: var(--color-warning-text);
+        .detail-notes-section h4 {
+            color: var(--text-primary);
+            font-size: var(--text-sm);
+            font-weight: var(--font-semibold);
+            margin: 0;
         }
 
         .detail-notes-text {
             font-size: var(--text-base);
-            color: var(--color-warning-text);
+            color: var(--text-primary);
             line-height: var(--leading-relaxed);
             white-space: pre-wrap;
         }
@@ -1208,26 +1435,107 @@
 
         .detail-ai-text {
             font-size: var(--text-base);
-            color: var(--color-info-text);
+            color: var(--text-primary);
             line-height: var(--leading-relaxed);
             white-space: pre-wrap;
         }
 
-        /* Detail panel - type badge */
-        .detail-type-badge {
-            display: inline-flex;
-            align-items: center;
+        /* Structured AI Summary styles */
+        .ai-summary-structured {
+            display: flex;
+            flex-direction: column;
             gap: var(--space-1);
-            font-size: var(--text-sm);
-            font-weight: var(--font-medium);
-            color: var(--text-secondary);
-            background: var(--bg-surface-secondary);
-            padding: var(--space-1) var(--space-3);
-            border-radius: var(--radius-full);
+            color: var(--text-primary);
         }
 
-        .detail-type-badge svg {
-            color: var(--text-tertiary);
+        .ai-summary-brief {
+            font-size: var(--text-base);
+            color: var(--text-primary);
+        }
+
+        .ai-summary-details {
+            border: none;
+            border-radius: 0;
+            padding: 0;
+        }
+
+        .ai-summary-details summary {
+            cursor: pointer;
+            font-weight: 500;
+            color: var(--text-primary);
+            padding: var(--space-1) 0;
+        }
+
+        .ai-summary-details > div {
+            padding-top: var(--space-2);
+            color: var(--text-primary);
+        }
+
+        /* Reduce paragraph spacing in detailed sections */
+        .ai-summary-details p {
+            margin: 0 0 var(--space-1) 0;
+        }
+
+        .ai-summary-details p:last-child {
+            margin-bottom: 0;
+        }
+
+        /* Key points list inside collapsible */
+        .ai-summary-keypoints-list {
+            margin: var(--space-2) 0 0 var(--space-4);
+            padding: 0;
+            color: var(--text-primary);
+        }
+
+        .ai-summary-keypoints-list li {
+            margin-bottom: var(--space-1);
+            color: var(--text-primary);
+        }
+
+        /* Context section */
+        .ai-summary-context {
+            margin-bottom: var(--space-3);
+            color: var(--text-primary);
+        }
+
+        /* Sources list (bulleted) */
+        .ai-summary-sources-list {
+            margin: var(--space-2) 0 0 var(--space-4);
+            padding: 0;
+            list-style-type: disc;
+            color: var(--text-primary);
+        }
+
+        .ai-summary-sources-list li {
+            margin-bottom: var(--space-1);
+            word-break: break-all;
+            color: var(--text-primary);
+        }
+
+        .ai-summary-sources-list a {
+            color: var(--color-link);
+            text-decoration: none;
+        }
+
+        .ai-summary-sources-list a:hover {
+            text-decoration: underline;
+        }
+
+        .ai-summary-speakers,
+        .ai-summary-entities {
+            font-size: var(--text-sm);
+            color: var(--text-primary);
+        }
+
+        .ai-transcript {
+            font-family: monospace;
+            font-size: var(--text-sm);
+            white-space: pre-wrap;
+            background: var(--bg-secondary);
+            padding: var(--space-2);
+            border-radius: var(--radius-sm);
+            max-height: 300px;
+            overflow-y: auto;
         }
 
         /* Detail panel - action buttons */
@@ -1274,9 +1582,102 @@
             display: flex;
             flex-wrap: wrap;
             gap: var(--space-2);
-            margin-bottom: var(--space-5);
-            padding-bottom: var(--space-5);
-            border-bottom: 1px solid var(--border-subtle);
+            margin-top: var(--space-4);
+            margin-left: calc(-1 * var(--space-5));
+            margin-right: calc(-1 * var(--space-5));
+            margin-bottom: calc(-1 * var(--space-5));
+            padding: var(--space-4) var(--space-5);
+            background: #f0f7ff;
+        }
+
+        /* Remove gap when tags follow page-info or AI section */
+        .detail-page-info + .detail-tags,
+        .detail-ai-section + .detail-tags {
+            margin-top: 0;
+        }
+
+        /* Remove bottom margin from AI section when followed by tags */
+        .detail-ai-section:has(+ .detail-tags) {
+            margin-bottom: 0;
+        }
+
+        /* Detail panel - related entries section */
+        .detail-related-section {
+            margin-top: var(--space-4);
+            padding-top: var(--space-4);
+            border-top: 1px solid var(--border-light);
+        }
+
+        .detail-related-section h4 {
+            font-size: var(--text-xs);
+            font-weight: var(--font-semibold);
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin: 0 0 var(--space-3) 0;
+        }
+
+        .related-group {
+            margin-bottom: var(--space-3);
+        }
+
+        .related-group:last-child {
+            margin-bottom: 0;
+        }
+
+        .related-group-label {
+            font-size: var(--text-xs);
+            color: var(--text-muted);
+            margin-bottom: var(--space-2);
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+        }
+
+        .related-group-label svg {
+            width: 14px;
+            height: 14px;
+        }
+
+        .related-item {
+            display: flex;
+            align-items: center;
+            gap: var(--space-2);
+            padding: var(--space-2) var(--space-3);
+            background: var(--bg-secondary);
+            border-radius: var(--radius-md);
+            margin-bottom: var(--space-1);
+            cursor: pointer;
+            transition: background var(--transition-fast);
+        }
+
+        .related-item:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .related-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .related-item-title {
+            flex: 1;
+            font-size: var(--text-sm);
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .related-item-meta {
+            font-size: var(--text-xs);
+            color: var(--text-muted);
+            white-space: nowrap;
+        }
+
+        .related-item-score {
+            font-size: var(--text-xs);
+            color: var(--accent-primary);
+            font-weight: var(--font-medium);
         }
 
         /* Detail panel - section header with copy button */
@@ -1308,12 +1709,12 @@
             color: var(--text-secondary);
         }
 
-        /* Detail panel - snippet section */
+        /* Detail panel - snippet section (yellow like notes) */
         .detail-snippet-section {
-            background: var(--bg-surface-secondary);
+            background: var(--color-warning-bg);
             margin: 0 calc(var(--space-5) * -1);
             padding: var(--space-4) var(--space-5);
-            border-top: none;
+            border-top: 1px solid var(--color-warning);
         }
 
         .detail-snippet-text {
@@ -1373,8 +1774,13 @@
         .detail-page-info {
             background: var(--bg-surface-secondary);
             margin: 0 calc(var(--space-5) * -1);
+            margin-bottom: 0;
             padding: var(--space-4) var(--space-5);
             border-radius: 0;
+        }
+
+        .detail-page-info h4 {
+            margin-bottom: var(--space-3);
         }
 
         .detail-og-image {
@@ -2125,10 +2531,15 @@
         .focus-ring:focus-visible,
         button:focus-visible,
         a:focus-visible,
-        input:focus-visible,
+        input:focus-visible:not(.search-box input),
         select:focus-visible {
             outline: 2px solid var(--color-primary);
             outline-offset: 2px;
+        }
+
+        /* Search box input has its own focus styling via .search-box:focus-within */
+        .search-box input:focus-visible {
+            outline: none;
         }
 
         /* Remove default outline */
@@ -2416,22 +2827,24 @@
         .management-header h2 {
             font-size: 20px;
             font-weight: 600;
-            color: #333;
+            color: var(--text-primary);
             margin: 0;
         }
 
         .management-list {
-            background: #fff;
-            border-radius: 8px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            background: var(--bg-surface);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--border-default);
             overflow: hidden;
+            max-width: 50%;
         }
 
         .management-item {
             display: flex;
             align-items: center;
             padding: 12px 16px;
-            border-bottom: 1px solid #f0f0f0;
+            border-bottom: 1px solid var(--border-subtle);
             gap: 12px;
         }
 
@@ -2442,13 +2855,13 @@
         .management-item-name {
             flex: 1;
             font-size: 14px;
-            color: #333;
+            color: var(--text-primary);
         }
 
         .management-item-count {
             font-size: 12px;
-            color: #888;
-            background: #f5f5f5;
+            color: var(--text-muted);
+            background: var(--bg-surface-secondary);
             padding: 2px 8px;
             border-radius: 10px;
         }
@@ -2456,9 +2869,11 @@
         .management-item input {
             flex: 1;
             padding: 6px 10px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
+            border: 1px solid var(--border-default);
+            border-radius: var(--radius-md);
             font-size: 14px;
+            background: var(--bg-surface);
+            color: var(--text-primary);
         }
 
         .management-item .btn-icon {
@@ -2466,40 +2881,47 @@
             border: none;
             cursor: pointer;
             padding: 6px;
-            color: #888;
-            border-radius: 4px;
+            color: var(--text-muted);
+            border-radius: var(--radius-md);
         }
 
         .management-item .btn-icon:hover {
-            background: #f5f5f5;
-            color: #333;
+            background: var(--bg-hover);
+            color: var(--text-primary);
         }
 
         .management-item .btn-icon.delete:hover {
-            background: #fee2e2;
-            color: #dc2626;
+            background: var(--color-danger-subtle);
+            color: var(--color-danger);
         }
 
         .add-item-row {
             display: flex;
             gap: 8px;
-            padding: 12px 16px;
-            background: #fafafa;
-            border-top: 1px solid #e5e5e5;
+            padding: 0;
+            margin-bottom: var(--space-4);
+            background: transparent;
         }
 
         .add-item-row input {
-            flex: 1;
+            width: 250px;
+            flex: none;
             padding: 8px 12px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
+            border: 1px solid var(--border-default);
+            border-radius: var(--radius-md);
             font-size: 14px;
+            background: var(--bg-surface);
+            color: var(--text-primary);
+        }
+
+        .add-item-row input::placeholder {
+            color: var(--text-muted);
         }
 
         .empty-state {
             text-align: center;
             padding: 40px 20px;
-            color: #888;
+            color: var(--text-muted);
         }
 
         /* Visualisation Page */
@@ -2913,21 +3335,8 @@
 
         .kanban-container.active {
             display: flex;
-            flex-direction: column;
-        }
-
-        .kanban-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 16px;
-        }
-
-        .kanban-header h2 {
-            font-size: 18px;
-            font-weight: 600;
-            color: #333;
-            margin: 0;
+            flex-direction: row;
+            gap: 0;
         }
 
         .kanban-board {
@@ -2954,17 +3363,17 @@
             font-weight: var(--font-semibold);
             font-size: var(--text-base);
             color: var(--text-primary);
-            border-bottom: 2px solid;
+            background: var(--bg-surface);
             display: flex;
             flex-direction: column;
             border-radius: var(--radius-lg) var(--radius-lg) 0 0;
             overflow: hidden;
+            cursor: pointer;
         }
 
         .kanban-color-bar {
-            height: 6px;
+            height: 8px;
             width: 100%;
-            cursor: pointer;
             transition: height var(--transition-fast);
         }
 
@@ -2981,13 +3390,11 @@
         }
 
         .kanban-column-name {
-            cursor: pointer;
+            cursor: text;
             padding: 2px var(--space-1);
             border-radius: var(--radius-sm);
             transition: background var(--transition-fast);
             outline: none;
-            flex: 1;
-            min-width: 0;
         }
 
         .kanban-column-name:hover {
@@ -2997,6 +3404,9 @@
         .kanban-column-name[contenteditable="true"] {
             background: var(--bg-surface);
             box-shadow: 0 0 0 2px var(--color-primary);
+            display: inline-block;
+            min-width: 50px;
+            max-width: 180px;
         }
 
         .kanban-header-actions {
@@ -3045,11 +3455,15 @@
             background: var(--bg-surface);
             border-radius: var(--radius-lg);
             box-shadow: var(--shadow-lg);
-            padding: var(--space-2);
-            display: flex;
+            padding: var(--space-3);
+            width: 200px;
+        }
+
+        .color-picker-grid {
+            display: grid;
+            grid-template-columns: repeat(6, 1fr);
             gap: var(--space-2);
-            flex-wrap: wrap;
-            width: 160px;
+            margin-bottom: var(--space-3);
         }
 
         .kanban-color-option {
@@ -3063,6 +3477,25 @@
         .kanban-color-option:hover {
             transform: scale(1.15);
             box-shadow: var(--shadow-md);
+        }
+
+        .color-picker-hex {
+            border-top: 1px solid var(--border-subtle);
+            padding-top: var(--space-2);
+        }
+
+        .hex-input {
+            width: 100%;
+            padding: var(--space-2);
+            border: 1px solid var(--border-default);
+            border-radius: var(--radius-md);
+            font-size: var(--text-sm);
+            font-family: monospace;
+        }
+
+        .hex-input:focus {
+            outline: none;
+            border-color: var(--color-primary);
         }
 
         .kanban-column-cards {
@@ -3179,6 +3612,11 @@
             margin-top: 8px;
         }
 
+        .kanban-card-date .overdue-text {
+            color: #ef4444;
+            font-weight: 500;
+        }
+
         .kanban-column-cards.drag-over {
             background: rgba(255, 82, 0, 0.05);
         }
@@ -3190,25 +3628,28 @@
             padding: 20px;
         }
 
-        /* Add column button */
+        /* Add column button - inline with columns */
         .kanban-add-column {
-            min-width: 200px;
-            background: #e5e5e5;
-            border-radius: 8px;
+            min-width: 48px;
+            width: 48px;
+            flex-shrink: 0;
+            background: var(--bg-surface-secondary);
+            border-radius: var(--radius-lg);
             display: flex;
             align-items: center;
             justify-content: center;
             cursor: pointer;
-            border: 2px dashed #ccc;
-            color: #888;
-            font-size: 14px;
-            transition: background 0.15s, border-color 0.15s;
+            border: 2px dashed var(--border-default);
+            color: var(--text-muted);
+            transition: all 0.15s;
+            margin-left: var(--space-4);
+            align-self: stretch;
         }
 
         .kanban-add-column:hover {
-            background: #ddd;
-            border-color: #999;
-            color: #666;
+            background: var(--bg-hover);
+            border-color: var(--color-primary);
+            color: var(--color-primary);
         }
 
         /* AI Processing Spinner */
@@ -3613,12 +4054,12 @@
 
         /* Settings Page Styles */
         .settings-content {
-            max-width: 600px;
+            max-width: 900px;
         }
 
         .settings-section {
-            background: white;
-            border: 1px solid #e5e7eb;
+            background: var(--bg-surface);
+            border: 1px solid var(--border-default);
             border-radius: 8px;
             padding: 24px;
         }
@@ -3627,17 +4068,17 @@
             font-size: 16px;
             font-weight: 600;
             margin: 0 0 8px 0;
-            color: #111827;
+            color: var(--text-primary);
         }
 
         .settings-description {
             font-size: 14px;
-            color: #6b7280;
+            color: var(--text-secondary);
             margin: 0 0 24px 0;
         }
 
         .settings-description code {
-            background: #f3f4f6;
+            background: var(--bg-surface-secondary);
             padding: 2px 6px;
             border-radius: 4px;
             font-size: 13px;
@@ -3651,18 +4092,20 @@
             display: block;
             font-size: 14px;
             font-weight: 500;
-            color: #374151;
+            color: var(--text-primary);
             margin-bottom: 6px;
         }
 
         .settings-field input {
             width: 100%;
             padding: 10px 12px;
-            border: 1px solid #d1d5db;
+            border: 1px solid var(--border-default);
             border-radius: 6px;
             font-size: 14px;
             font-family: 'SF Mono', 'Monaco', monospace;
             box-sizing: border-box;
+            background: var(--bg-surface);
+            color: var(--text-primary);
         }
 
         .settings-field input:focus {
@@ -3682,9 +4125,9 @@
 
         .settings-field .btn-browse {
             padding: 10px 16px;
-            background: #e5e7eb;
-            color: #374151;
-            border: 1px solid #d1d5db;
+            background: var(--bg-surface-secondary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-default);
             border-radius: 6px;
             font-size: 14px;
             cursor: pointer;
@@ -3692,19 +4135,21 @@
         }
 
         .settings-field .btn-browse:hover {
-            background: #d1d5db;
+            background: var(--bg-hover);
         }
 
         .settings-field textarea {
             width: 100%;
             padding: 10px 12px;
-            border: 1px solid #d1d5db;
+            border: 1px solid var(--border-default);
             border-radius: 6px;
             font-size: 13px;
             font-family: 'SF Mono', 'Monaco', monospace;
             box-sizing: border-box;
             resize: vertical;
             line-height: 1.5;
+            background: var(--bg-surface);
+            color: var(--text-primary);
         }
 
         .settings-field textarea:focus {
@@ -3722,7 +4167,7 @@
         .settings-help {
             display: block;
             font-size: 12px;
-            color: #9ca3af;
+            color: var(--text-tertiary);
             margin-top: 4px;
         }
 
@@ -3733,7 +4178,7 @@
         .settings-actions {
             margin-top: 24px;
             padding-top: 20px;
-            border-top: 1px solid #e5e7eb;
+            border-top: 1px solid var(--border-default);
             display: flex;
             align-items: center;
             gap: 12px;
@@ -3856,6 +4301,126 @@
         #logsPage.active {
             display: block;
         }
+
+        /* Toast notification */
+        .toast-notification {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            background: var(--text-primary);
+            color: var(--bg-surface);
+            padding: var(--space-3) var(--space-5);
+            border-radius: var(--radius-lg);
+            font-size: var(--text-sm);
+            box-shadow: var(--shadow-lg);
+            z-index: 10000;
+            opacity: 0;
+            transition: transform 0.3s ease, opacity 0.3s ease;
+        }
+
+        .toast-notification.visible {
+            transform: translateX(-50%) translateY(0);
+            opacity: 1;
+        }
+
+        /* Confirm Modal */
+        .confirm-modal {
+            position: fixed;
+            inset: 0;
+            z-index: calc(var(--z-modal) + 20);
+            pointer-events: none;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .confirm-modal[data-open="true"] {
+            pointer-events: auto;
+        }
+
+        .confirm-modal-backdrop {
+            position: absolute;
+            inset: 0;
+            background: var(--overlay-bg);
+            backdrop-filter: blur(4px);
+            opacity: 0;
+            transition: opacity 0.15s ease;
+        }
+
+        .confirm-modal[data-open="true"] .confirm-modal-backdrop {
+            opacity: 1;
+        }
+
+        .confirm-modal-content {
+            position: relative;
+            width: 400px;
+            max-width: 90vw;
+            background: var(--bg-surface);
+            border-radius: var(--radius-xl);
+            box-shadow: var(--shadow-2xl);
+            padding: var(--space-6);
+            transform: scale(0.95) translateY(-10px);
+            opacity: 0;
+            transition: transform 0.15s ease, opacity 0.15s ease;
+        }
+
+        .confirm-modal[data-open="true"] .confirm-modal-content {
+            transform: scale(1) translateY(0);
+            opacity: 1;
+        }
+
+        .confirm-modal-title {
+            font-size: var(--text-lg);
+            font-weight: 600;
+            color: var(--text-primary);
+            text-align: center;
+            margin-bottom: var(--space-2);
+        }
+
+        .confirm-modal-message {
+            font-size: var(--text-sm);
+            color: var(--text-secondary);
+            text-align: center;
+            margin-bottom: var(--space-6);
+            line-height: 1.5;
+        }
+
+        .confirm-modal-actions {
+            display: flex;
+            gap: var(--space-3);
+            justify-content: center;
+        }
+
+        .confirm-modal-btn {
+            padding: var(--space-2) var(--space-5);
+            border-radius: var(--radius-md);
+            font-size: var(--text-sm);
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            border: 1px solid var(--border-default);
+        }
+
+        .confirm-modal-btn-cancel {
+            background: var(--bg-surface);
+            color: var(--text-primary);
+        }
+
+        .confirm-modal-btn-cancel:hover {
+            background: var(--bg-surface-secondary);
+        }
+
+        .confirm-modal-btn-danger {
+            background: var(--color-danger);
+            color: white;
+            border-color: var(--color-danger);
+        }
+
+        .confirm-modal-btn-danger:hover {
+            background: var(--color-danger-hover);
+            border-color: var(--color-danger-hover);
+        }
     </style>
 </head>
 <body>
@@ -3864,9 +4429,10 @@
         <header class="top-header">
             <img src="/ultrathink-extension/icons/icon32.png" alt="" class="logo">
             <h1>Ultrathink</h1>
+            <span class="viewer-version">v3.3.16</span>
             <div class="header-spacer"></div>
-            <button class="theme-toggle" onclick="toggleTheme()" aria-label="Toggle dark mode" title="Toggle dark mode">
-                <svg class="theme-icon-light" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <button class="icon-btn" id="themeToggleBtn" onclick="toggleTheme()" title="Toggle dark mode">
+                <svg class="theme-icon-light" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="12" cy="12" r="5"></circle>
                     <line x1="12" y1="1" x2="12" y2="3"></line>
                     <line x1="12" y1="21" x2="12" y2="23"></line>
@@ -3877,7 +4443,7 @@
                     <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
                     <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
                 </svg>
-                <svg class="theme-icon-dark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <svg class="theme-icon-dark" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
                 </svg>
             </button>
@@ -3955,9 +4521,9 @@
                         </a>
                     </div>
 
-                    <!-- Organize Section -->
+                    <!-- Organise Section -->
                     <div class="nav-section">
-                        <div class="nav-section-label">Organize</div>
+                        <div class="nav-section-label">Organise</div>
                         <a class="nav-item" data-page="topics">
                             <svg viewBox="0 0 256 256" fill="currentColor">
                                 <path d="M243.31,136,144,36.69A15.86,15.86,0,0,0,132.69,32H40a8,8,0,0,0-8,8v92.69A15.86,15.86,0,0,0,36.69,144L136,243.31a16,16,0,0,0,22.63,0l84.68-84.68a16,16,0,0,0,0-22.63ZM147.31,232,48,132.69V48h84.69L232,147.31ZM96,84A12,12,0,1,1,84,72,12,12,0,0,1,96,84Z"/>
@@ -4027,6 +4593,18 @@
                         <button class="cat-toggle-btn" data-category="work" id="catWork">Work</button>
                         <button class="cat-toggle-btn" data-category="personal" id="catPersonal">Personal</button>
                     </div>
+                    <button class="icon-btn icon-btn-danger" id="deleteSelected" disabled title="Delete selected">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="3 6 5 6 21 6"/>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                        </svg>
+                    </button>
+                    <button class="icon-btn" id="hideCompletedBtn" title="Hide completed" style="display: none;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                            <circle cx="12" cy="12" r="3"/>
+                        </svg>
+                    </button>
                     <div class="toolbar-right">
                         <!-- Task-specific filters (shown only on Tasks page) -->
                         <div class="task-filters" id="taskFilters" style="display: none;">
@@ -4042,23 +4620,11 @@
                                     </svg>
                                 </button>
                             </div>
-                            <button class="icon-btn" id="hideCompletedBtn" title="Hide completed">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                                    <circle cx="12" cy="12" r="3"/>
-                                </svg>
-                            </button>
                         </div>
                         <button class="icon-btn" id="refreshBtn" title="Refresh">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <path d="M23 4v6h-6M1 20v-6h6"/>
                                 <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-                            </svg>
-                        </button>
-                        <button class="icon-btn icon-btn-danger" id="deleteSelected" disabled title="Delete selected">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <polyline points="3 6 5 6 21 6"/>
-                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
                             </svg>
                         </button>
                     </div>
@@ -4186,12 +4752,14 @@
 
                 <!-- Kanban Board (for Tasks page) -->
                 <div class="kanban-container" id="kanbanContainer">
-                    <div class="kanban-header">
-                        <h2>Task Board</h2>
-                        <button class="btn btn-default" id="addColumnBtn">+ Add Column</button>
-                    </div>
                     <div class="kanban-board" id="kanbanBoard">
                         <!-- Columns dynamically generated -->
+                    </div>
+                    <div class="kanban-add-column" id="addColumnBtn" title="Add column">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
                     </div>
                 </div>
 
@@ -4200,11 +4768,11 @@
                     <div class="management-header">
                         <h2>Topics</h2>
                     </div>
-                    <div class="management-list" id="topicsList"></div>
                     <div class="add-item-row">
                         <input type="text" id="newTopicInput" placeholder="Add new topic...">
                         <button class="btn btn-primary" id="addTopicBtn">Add</button>
                     </div>
+                    <div class="management-list" id="topicsList"></div>
                 </div>
 
                 <!-- People Management Page -->
@@ -4212,11 +4780,11 @@
                     <div class="management-header">
                         <h2>People & Roles</h2>
                     </div>
-                    <div class="management-list" id="peopleList"></div>
                     <div class="add-item-row">
                         <input type="text" id="newPersonInput" placeholder="Add new person or role...">
                         <button class="btn btn-primary" id="addPersonBtn">Add</button>
                     </div>
+                    <div class="management-list" id="peopleList"></div>
                 </div>
 
                 <!-- Visualisation Page -->
@@ -4469,57 +5037,73 @@
                             <div class="settings-field">
                                 <label for="settingClassificationPrompt">Classification prompt</label>
                                 <textarea id="settingClassificationPrompt" rows="12" placeholder="Customise how entries are classified..."></textarea>
-                                <span class="settings-help">Placeholders: {title}, {url}, {content}, {existing_topics}, {existing_people}</span>
-                                <button class="btn btn-secondary btn-small" id="resetClassificationPrompt">Reset to default</button>
-                            </div>
-
-                            <div class="settings-field">
-                                <label for="settingGrammarPrompt">Grammar correction prompt</label>
-                                <textarea id="settingGrammarPrompt" rows="8" placeholder="Customise grammar correction..."></textarea>
-                                <span class="settings-help">Placeholders: {text}, {domain}, {title}, {type}</span>
-                                <button class="btn btn-secondary btn-small" id="resetGrammarPrompt">Reset to default</button>
+                                <span class="settings-help"><strong>gpt-5-nano</strong> | All entry types | Grammar fix, entity, topics, people, category</span>
+                                <span class="settings-help">Placeholders: {title}, {url}, {content}, {notes}, {existing_topics}, {existing_people}</span>
                             </div>
 
                             <div class="settings-field">
                                 <label for="settingImagePrompt">Image summary prompt</label>
                                 <textarea id="settingImagePrompt" rows="4" placeholder="Customise image description..."></textarea>
-                                <span class="settings-help">Used for screenshots and images. No placeholders.</span>
-                                <button class="btn btn-secondary btn-small" id="resetImagePrompt">Reset to default</button>
+                                <span class="settings-help"><strong>gpt-5</strong> + web search | Types: image, screenshot</span>
+                                <span class="settings-help">Placeholder: {notes}</span>
                             </div>
 
                             <div class="settings-field">
                                 <label for="settingAudioPrompt">Audio summary prompt</label>
                                 <textarea id="settingAudioPrompt" rows="8" placeholder="Customise audio transcription analysis..."></textarea>
+                                <span class="settings-help"><strong>gpt-4o-transcribe</strong> then <strong>gpt-5-nano</strong> | Types: audio</span>
                                 <span class="settings-help">Placeholders: {transcript}, {notes}</span>
-                                <button class="btn btn-secondary btn-small" id="resetAudioPrompt">Reset to default</button>
                             </div>
 
                             <div class="settings-field">
                                 <label for="settingDocumentPrompt">Document summary prompt</label>
                                 <textarea id="settingDocumentPrompt" rows="4" placeholder="Customise document summarisation..."></textarea>
-                                <span class="settings-help">Used for PDFs, markdown, and text documents. Placeholder: {content}</span>
-                                <button class="btn btn-secondary btn-small" id="resetDocumentPrompt">Reset to default</button>
+                                <span class="settings-help"><strong>gpt-5-nano</strong> | Types: pdf, markdown, ms-word, ms-excel, ms-powerpoint</span>
+                                <span class="settings-help">Placeholder: {content}</span>
                             </div>
 
                             <div class="settings-field">
                                 <label for="settingLinkPrompt">Link summary prompt</label>
                                 <textarea id="settingLinkPrompt" rows="10" placeholder="Customise web link analysis..."></textarea>
-                                <span class="settings-help">Placeholders: {url}, {title}, {notes}. Uses web search.</span>
-                                <button class="btn btn-secondary btn-small" id="resetLinkPrompt">Reset to default</button>
+                                <span class="settings-help"><strong>gpt-5</strong> + web search | Types: link</span>
+                                <span class="settings-help">Placeholders: {url}, {title}, {notes}</span>
                             </div>
 
                             <div class="settings-field">
                                 <label for="settingTextPrompt">Text summary prompt</label>
                                 <textarea id="settingTextPrompt" rows="4" placeholder="Customise text summarisation..."></textarea>
-                                <span class="settings-help">Used for snippets, notes, ideas. Placeholder: {text}</span>
-                                <button class="btn btn-secondary btn-small" id="resetTextPrompt">Reset to default</button>
+                                <span class="settings-help"><strong>gpt-5</strong> + web search | Types: snippet, para, claude, chatgpt, perplexity, notion, long-note</span>
+                                <span class="settings-help">Placeholders: {selectedText}, {notes}</span>
                             </div>
 
                             <div class="settings-field">
                                 <label for="settingResearchPrompt">Research summary prompt</label>
                                 <textarea id="settingResearchPrompt" rows="4" placeholder="Customise research summary..."></textarea>
-                                <span class="settings-help">Used for long notes requiring background research. Placeholder: {notes}</span>
-                                <button class="btn btn-secondary btn-small" id="resetResearchPrompt">Reset to default</button>
+                                <span class="settings-help"><strong>gpt-5</strong> + web search | Types: idea</span>
+                                <span class="settings-help">Placeholder: {notes}</span>
+                            </div>
+
+                            <h4 style="margin-top: 24px; margin-bottom: 12px; color: var(--text-secondary);">Relationship prompts</h4>
+
+                            <div class="settings-field">
+                                <label for="settingRelationshipExtractionPrompt">Relationship extraction prompt</label>
+                                <textarea id="settingRelationshipExtractionPrompt" rows="6" placeholder="Customise relationship extraction..."></textarea>
+                                <span class="settings-help"><strong>gpt-5-nano</strong> | All entry types with notes >= 10 chars</span>
+                                <span class="settings-help">Placeholders: {notes}, {title}, {topics}</span>
+                            </div>
+
+                            <div class="settings-field">
+                                <label for="settingRelationshipResolutionPrompt">Relationship resolution prompt</label>
+                                <textarea id="settingRelationshipResolutionPrompt" rows="4" placeholder="Customise relationship resolution..."></textarea>
+                                <span class="settings-help"><strong>gpt-5-nano</strong> | When references found, picks best match</span>
+                                <span class="settings-help">Placeholders: {phrase}, {target}, {candidates}</span>
+                            </div>
+
+                            <div class="settings-field">
+                                <label for="settingContentSimilarityPrompt">Content similarity prompt</label>
+                                <textarea id="settingContentSimilarityPrompt" rows="5" placeholder="Customise content similarity..."></textarea>
+                                <span class="settings-help"><strong>gpt-5-nano</strong> | All entry types | Finds semantically similar entries</span>
+                                <span class="settings-help">Placeholders: {new_entry}, {candidates}</span>
                             </div>
 
                             <div class="settings-actions">
@@ -4574,48 +5158,21 @@
     <div class="detail-panel" id="detailPanel" data-open="false">
         <div class="detail-backdrop" onclick="closeDetailPanel()"></div>
         <div class="detail-content">
-            <div class="detail-header">
-                <div class="detail-header-left">
-                    <span class="detail-type-badge" id="detailTypeBadge">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
-                            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
-                        </svg>
-                        <span id="detailTypeText">Link</span>
-                    </span>
-                </div>
-                <div class="detail-header-actions">
-                    <button class="detail-action-btn" id="detailOpenUrl" title="Open URL">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-                            <polyline points="15,3 21,3 21,9"/>
-                            <line x1="10" y1="14" x2="21" y2="3"/>
-                        </svg>
-                    </button>
-                    <button class="detail-action-btn" id="detailCopyUrl" title="Copy URL">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                        </svg>
-                    </button>
-                    <button class="detail-action-btn detail-action-danger" id="detailDelete" title="Delete">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="3,6 5,6 21,6"/>
-                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                            <line x1="10" y1="11" x2="10" y2="17"/>
-                            <line x1="14" y1="11" x2="14" y2="17"/>
-                        </svg>
-                    </button>
-                    <button class="detail-close" onclick="closeDetailPanel()" title="Close">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <line x1="18" y1="6" x2="6" y2="18"/>
-                            <line x1="6" y1="6" x2="18" y2="18"/>
-                        </svg>
-                    </button>
-                </div>
-            </div>
             <div class="detail-body" id="detailBody">
                 <!-- Content populated dynamically -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Confirm Modal -->
+    <div class="confirm-modal" id="confirmModal" data-open="false">
+        <div class="confirm-modal-backdrop" onclick="closeConfirmModal()"></div>
+        <div class="confirm-modal-content">
+            <div class="confirm-modal-title" id="confirmModalTitle">Delete Entry</div>
+            <div class="confirm-modal-message" id="confirmModalMessage">Are you sure you want to delete this entry? This action cannot be undone.</div>
+            <div class="confirm-modal-actions">
+                <button class="confirm-modal-btn confirm-modal-btn-cancel" onclick="closeConfirmModal()">Cancel</button>
+                <button class="confirm-modal-btn confirm-modal-btn-danger" id="confirmModalConfirm">Delete</button>
             </div>
         </div>
     </div>

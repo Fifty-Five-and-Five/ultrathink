@@ -26,6 +26,18 @@ PORT = 8080
 _PROJECT_FOLDER_CACHE = None
 
 
+def convert_windows_to_wsl_path(windows_path):
+    """Convert Windows path to WSL path if running in WSL."""
+    import platform
+    if 'microsoft' in platform.uname().release.lower() or 'wsl' in platform.uname().release.lower():
+        # Running in WSL - convert Windows path to WSL path
+        if windows_path and len(windows_path) >= 2 and windows_path[1] == ':':
+            drive = windows_path[0].lower()
+            rest = windows_path[2:].replace('\\', '/')
+            return f'/mnt/{drive}{rest}'
+    return windows_path
+
+
 def get_project_folder():
     """Get project folder from settings.json (single source of truth)."""
     global _PROJECT_FOLDER_CACHE
@@ -40,6 +52,8 @@ def get_project_folder():
                 settings = json.load(f)
                 folder = settings.get('project_folder')
                 if folder:
+                    # Convert Windows path to WSL path if needed
+                    folder = convert_windows_to_wsl_path(folder)
                     _PROJECT_FOLDER_CACHE = Path(folder)
                     return _PROJECT_FOLDER_CACHE
         except Exception:
@@ -116,6 +130,12 @@ TASKSTATUS_PATTERN = re.compile(r'^  - Status: (.+)$')
 # Category pattern (work/personal)
 CATEGORY_PATTERN = re.compile(r'^  - Category: (.+)$')
 
+# Due date pattern for tasks
+DUEDATE_PATTERN = re.compile(r'^  - Due: (.+)$')
+
+# Comment pattern (timestamped comments)
+COMMENT_PATTERN = re.compile(r'^  - Comment \[(.+)\]: (.+)$')
+
 
 def parse_kb_markdown(content):
     """Parse kb.md content into list of entry objects.
@@ -158,6 +178,10 @@ def parse_kb_markdown(content):
                 'topics': [],
                 'people': [],
                 'category': '',  # work or personal
+                # Relationship fields
+                'parentId': '',  # Parent entry timestamp (for sub-notes)
+                'related': [],   # AI-detected note mentions [{timestamp, type}]
+                'similar': [],   # AI-detected similar entries [{timestamp, score}]
                 # Page metadata (optional)
                 'description': '',
                 'ogImage': '',
@@ -165,7 +189,9 @@ def parse_kb_markdown(content):
                 'publishedDate': '',
                 'readingTime': 0,
                 'aiSummary': '',
-                'taskStatus': ''  # For kanban board (not-started, in-progress, done, or custom)
+                'taskStatus': '',  # For kanban board (not-started, in-progress, done, or custom)
+                'dueDate': '',  # Due date for tasks (YYYY-MM-DD format)
+                'comments': []  # Timestamped comments array [{timestamp, text}]
             }
             continue
 
@@ -199,6 +225,10 @@ def parse_kb_markdown(content):
                 'topics': [],
                 'people': [],
                 'category': '',  # work or personal
+                # Relationship fields
+                'parentId': '',  # Parent entry timestamp (for sub-notes)
+                'related': [],   # AI-detected note mentions [{timestamp, type}]
+                'similar': [],   # AI-detected similar entries [{timestamp, score}]
                 # Page metadata (optional)
                 'description': '',
                 'ogImage': '',
@@ -206,7 +236,9 @@ def parse_kb_markdown(content):
                 'publishedDate': '',
                 'readingTime': 0,
                 'aiSummary': '',
-                'taskStatus': ''  # For kanban board
+                'taskStatus': '',  # For kanban board
+                'dueDate': '',  # Due date for tasks (YYYY-MM-DD format)
+                'comments': []  # Timestamped comments array [{timestamp, text}]
             }
             continue
 
@@ -263,6 +295,44 @@ def parse_kb_markdown(content):
                 # Check for Category (work/personal)
                 elif content_line.startswith('Category: '):
                     current_entry['category'] = content_line[10:]
+                # Check for ParentId (sub-note parent reference)
+                elif content_line.startswith('ParentId: '):
+                    current_entry['parentId'] = content_line[10:]
+                # Check for Related (AI-detected note mentions)
+                # Format: timestamp (type), timestamp (type)
+                elif content_line.startswith('Related: '):
+                    related_str = content_line[9:]
+                    for item in related_str.split(', '):
+                        # Parse "2025-11-30 14:00:00 (mentions)" format
+                        rel_match = re.match(r'(.+?) \((\w+)\)', item.strip())
+                        if rel_match:
+                            current_entry['related'].append({
+                                'timestamp': rel_match.group(1),
+                                'type': rel_match.group(2)
+                            })
+                # Check for Similar (AI-detected similar entries)
+                # Format: timestamp (score), timestamp (score)
+                elif content_line.startswith('Similar: '):
+                    similar_str = content_line[9:]
+                    for item in similar_str.split(', '):
+                        # Parse "2025-11-30 14:00:00 (85)" format
+                        sim_match = re.match(r'(.+?) \((\d+)\)', item.strip())
+                        if sim_match:
+                            current_entry['similar'].append({
+                                'timestamp': sim_match.group(1),
+                                'score': int(sim_match.group(2))
+                            })
+                # Check for Due date
+                elif content_line.startswith('Due: '):
+                    current_entry['dueDate'] = content_line[5:]
+                # Check for Comment [timestamp]: text
+                elif content_line.startswith('Comment ['):
+                    comment_match = COMMENT_PATTERN.match(line)
+                    if comment_match:
+                        current_entry['comments'].append({
+                            'timestamp': comment_match.group(1),
+                            'text': comment_match.group(2)
+                        })
                 # Check for screenshot
                 elif SCREENSHOT_PATTERN.match(content_line):
                     screenshot_match = SCREENSHOT_PATTERN.match(content_line)
@@ -383,7 +453,8 @@ def update_entry_status(timestamp, status):
             if in_target_entry and not status_updated:
                 # Add status line before the entry ends
                 new_lines.extend(entry_content_lines)
-                new_lines.append(f'  - Status: {status}\n')
+                if status:  # Only add Status line if not empty
+                    new_lines.append(f'  - Status: {status}\n')
                 status_updated = True
                 entry_content_lines = []
 
@@ -401,35 +472,211 @@ def update_entry_status(timestamp, status):
             if line.startswith('  - '):
                 # Check if this is the status line
                 if line.startswith('  - Status: '):
-                    # Replace existing status
-                    new_lines.append(f'  - Status: {status}\n')
+                    # First add any content lines collected before the status line
+                    new_lines.extend(entry_content_lines)
+                    entry_content_lines = []
+                    # Replace existing status (or remove if empty)
+                    if status:
+                        new_lines.append(f'  - Status: {status}\n')
                     status_updated = True
                 else:
-                    entry_content_lines.append(line)
+                    # If status already updated, add directly; otherwise collect
+                    if status_updated:
+                        new_lines.append(line)
+                    else:
+                        entry_content_lines.append(line)
             elif line.strip() == '' or line.startswith('- `') or line.startswith('- **'):
-                # Entry ended - add status if not updated
+                # Entry ended - add any remaining collected content lines
+                new_lines.extend(entry_content_lines)
+                entry_content_lines = []
+                # Add status if not updated
                 if not status_updated:
-                    new_lines.extend(entry_content_lines)
-                    new_lines.append(f'  - Status: {status}\n')
+                    if status:  # Only add Status line if not empty
+                        new_lines.append(f'  - Status: {status}\n')
                     status_updated = True
-                    entry_content_lines = []
                 new_lines.append(line)
                 in_target_entry = False
             else:
-                entry_content_lines.append(line)
+                # Non "  - " line within entry (e.g., continuation)
+                if status_updated:
+                    new_lines.append(line)
+                else:
+                    entry_content_lines.append(line)
         else:
             new_lines.append(line)
 
     # Handle case where target entry is at end of file
-    if in_target_entry and not status_updated:
+    if in_target_entry:
         new_lines.extend(entry_content_lines)
-        new_lines.append(f'  - Status: {status}\n')
-        status_updated = True
+        if not status_updated:
+            if status:  # Only add Status line if not empty
+                new_lines.append(f'  - Status: {status}\n')
+            status_updated = True
 
     if found_entry:
         with open(kb_file, 'w', encoding='utf-8') as f:
             f.writelines(new_lines)
         return {'success': True}
+    else:
+        return {'success': False, 'error': f'Entry with timestamp {timestamp} not found'}
+
+
+def update_entry_duedate(timestamp, due_date):
+    """Update or remove due date for entry with matching timestamp in kb.md.
+
+    Args:
+        timestamp: Entry timestamp to match
+        due_date: Due date string (YYYY-MM-DD format) or empty string to remove
+    """
+    print(f"[DEBUG] update_entry_duedate called: timestamp='{timestamp}', due_date='{due_date}'")
+    kb_file = get_project_folder() / 'kb.md'
+    print(f"[DEBUG] kb_file={kb_file}, exists={kb_file.exists()}")
+    if not kb_file.exists():
+        return {'success': False, 'error': 'kb.md not found'}
+
+    with open(kb_file, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+
+    new_lines = []
+    found_entry = False
+    in_target_entry = False
+    due_updated = False
+    entry_content_lines = []
+
+    for i, line in enumerate(lines):
+        if line.startswith('- `') or line.startswith('- **'):
+            # Always flush buffer when entering new entry, conditionally add Due line
+            if in_target_entry and not due_updated:
+                new_lines.extend(entry_content_lines)
+                if due_date:  # Only add Due line if not empty
+                    new_lines.append(f'  - Due: {due_date}\n')
+                due_updated = True
+                entry_content_lines = []
+
+            in_target_entry = False
+
+            if f'`{timestamp}`' in line:
+                found_entry = True
+                in_target_entry = True
+                new_lines.append(line)
+                continue
+
+        if in_target_entry:
+            if line.startswith('  - '):
+                if line.startswith('  - Due: '):
+                    new_lines.extend(entry_content_lines)
+                    entry_content_lines = []
+                    if due_date:  # Only add if due_date is not empty
+                        new_lines.append(f'  - Due: {due_date}\n')
+                    due_updated = True
+                else:
+                    # If due already updated, add directly; otherwise collect
+                    if due_updated:
+                        new_lines.append(line)
+                    else:
+                        entry_content_lines.append(line)
+            elif line.strip() == '' or line.startswith('- `') or line.startswith('- **'):
+                # Entry ended - add any remaining collected content lines
+                new_lines.extend(entry_content_lines)
+                entry_content_lines = []
+                if not due_updated:
+                    if due_date:  # Only add Due line if not empty
+                        new_lines.append(f'  - Due: {due_date}\n')
+                    due_updated = True
+                new_lines.append(line)
+                in_target_entry = False
+            else:
+                # Non "  - " line within entry
+                if due_updated:
+                    new_lines.append(line)
+                else:
+                    entry_content_lines.append(line)
+        else:
+            new_lines.append(line)
+
+    if in_target_entry:
+        new_lines.extend(entry_content_lines)
+        if not due_updated:
+            if due_date:  # Only add Due line if not empty
+                new_lines.append(f'  - Due: {due_date}\n')
+            due_updated = True
+
+    print(f"[DEBUG] After loop: found_entry={found_entry}, due_updated={due_updated}")
+    if found_entry:
+        print(f"[DEBUG] Writing {len(new_lines)} lines to kb.md")
+        with open(kb_file, 'w', encoding='utf-8') as f:
+            f.writelines(new_lines)
+        return {'success': True}
+    else:
+        print(f"[DEBUG] Entry NOT FOUND for timestamp: '{timestamp}'")
+        return {'success': False, 'error': f'Entry with timestamp {timestamp} not found'}
+
+
+def add_entry_comment(timestamp, comment_text):
+    """Add a timestamped comment to entry with matching timestamp in kb.md.
+
+    Args:
+        timestamp: Entry timestamp to match
+        comment_text: Comment text to add
+    """
+    from datetime import datetime
+
+    kb_file = get_project_folder() / 'kb.md'
+    if not kb_file.exists():
+        return {'success': False, 'error': 'kb.md not found'}
+
+    # Generate comment timestamp
+    comment_timestamp = datetime.now().strftime('%Y-%m-%d %H:%M')
+
+    with open(kb_file, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+
+    new_lines = []
+    found_entry = False
+    in_target_entry = False
+    comment_added = False
+    entry_content_lines = []
+
+    for i, line in enumerate(lines):
+        if line.startswith('- `') or line.startswith('- **'):
+            if in_target_entry and not comment_added:
+                new_lines.extend(entry_content_lines)
+                new_lines.append(f'  - Comment [{comment_timestamp}]: {comment_text}\n')
+                comment_added = True
+                entry_content_lines = []
+
+            in_target_entry = False
+
+            if f'`{timestamp}`' in line:
+                found_entry = True
+                in_target_entry = True
+                new_lines.append(line)
+                continue
+
+        if in_target_entry:
+            if line.startswith('  - '):
+                # Always add content lines directly for comments (appending at end)
+                new_lines.append(line)
+            elif line.strip() == '' or line.startswith('- `') or line.startswith('- **'):
+                # Entry ended - add comment before ending
+                if not comment_added:
+                    new_lines.append(f'  - Comment [{comment_timestamp}]: {comment_text}\n')
+                    comment_added = True
+                new_lines.append(line)
+                in_target_entry = False
+            else:
+                new_lines.append(line)
+        else:
+            new_lines.append(line)
+
+    if in_target_entry and not comment_added:
+        new_lines.append(f'  - Comment [{comment_timestamp}]: {comment_text}\n')
+        comment_added = True
+
+    if found_entry:
+        with open(kb_file, 'w', encoding='utf-8') as f:
+            f.writelines(new_lines)
+        return {'success': True, 'timestamp': comment_timestamp}
     else:
         return {'success': False, 'error': f'Entry with timestamp {timestamp} not found'}
 
@@ -1562,19 +1809,43 @@ class KBHandler(http.server.BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(content_length)) if content_length > 0 else {}
 
         if parsed.path == '/api/entries':
-            # Update task status
+            # Update entry fields (taskStatus or dueDate)
             timestamp = body.get('timestamp')
-            task_status = body.get('taskStatus')
 
             if not timestamp:
                 self.send_json({'success': False, 'error': 'Missing timestamp'}, 400)
                 return
 
-            if task_status is None:
-                self.send_json({'success': False, 'error': 'Missing taskStatus'}, 400)
+            # Handle taskStatus update
+            if 'taskStatus' in body:
+                result = update_entry_status(timestamp, body.get('taskStatus'))
+                self.send_json(result)
                 return
 
-            result = update_entry_status(timestamp, task_status)
+            # Handle dueDate update (empty string removes the due date)
+            if 'dueDate' in body:
+                print(f"[DEBUG] PATCH dueDate: timestamp={timestamp}, dueDate={body.get('dueDate')}")
+                result = update_entry_duedate(timestamp, body.get('dueDate', ''))
+                print(f"[DEBUG] result={result}")
+                self.send_json(result)
+                return
+
+            self.send_json({'success': False, 'error': 'No field to update'}, 400)
+
+        elif parsed.path == '/api/entries/comment':
+            # Add a comment to an entry
+            timestamp = body.get('timestamp')
+            comment_text = body.get('comment', '').strip()
+
+            if not timestamp:
+                self.send_json({'success': False, 'error': 'Missing timestamp'}, 400)
+                return
+
+            if not comment_text:
+                self.send_json({'success': False, 'error': 'Missing comment text'}, 400)
+                return
+
+            result = add_entry_comment(timestamp, comment_text)
             self.send_json(result)
 
         else:
